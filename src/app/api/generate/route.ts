@@ -90,13 +90,16 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         },
         body: JSON.stringify({
           name: `acasting-img2vid-${Date.now()}`,
-          image_url: imageUrl,
           prompt: req.enhancedPrompt ?? req.prompt,
+          end_seconds: 5,
+          assets: {
+            image: imageUrl,
+          },
           output: {
             width: 1280,
             height: 720,
             frame_rate: 24,
-            duration: 5,
+            duration_seconds: 5,
           },
         }),
       })
@@ -110,14 +113,13 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         },
         body: JSON.stringify({
           name: `acasting-${Date.now()}`,
-          style: {
-            prompt: req.enhancedPrompt ?? req.prompt,
-          },
+          prompt: req.enhancedPrompt ?? req.prompt,
+          end_seconds: 5,
           output: {
             width: 1280,
             height: 720,
             frame_rate: 24,
-            duration: 5,
+            duration_seconds: 5,
           },
         }),
       })
@@ -163,9 +165,7 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
       },
       body: JSON.stringify({
         name: `acasting-img-${Date.now()}`,
-        style: {
-          prompt: req.enhancedPrompt ?? req.prompt,
-        },
+        prompt: req.enhancedPrompt ?? req.prompt,
         output: {
           width:  1024,
           height: 1024,
