@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -27,7 +29,35 @@ export async function GET(request: NextRequest) {
       prisma.generation.count({ where }),
     ])
 
-    return NextResponse.json({ items, total, limit, offset })
+    const formatted = items.map(item => ({
+      id: item.id,
+      request: {
+        prompt: item.prompt,
+        enhancedPrompt: item.enhancedPrompt,
+        provider: item.provider,
+        model: item.model,
+        mediaType: item.mediaType,
+        task: item.task,
+        style: item.style,
+        lighting: item.lighting,
+        composition: item.composition,
+        aspectRatio: item.aspectRatio,
+        width: item.width,
+        height: item.height,
+        seed: item.seed,
+        imageUrls: [],
+      },
+      status: item.status,
+      resultUrl: item.resultUrl,
+      thumbnailUrl: item.thumbnailUrl,
+      errorMessage: item.errorMessage,
+      creditsUsed: item.creditsUsed,
+      createdAt: item.createdAt,
+      completedAt: item.completedAt,
+      providerJobId: item.providerJobId,
+    }))
+
+    return NextResponse.json({ items: formatted, total, limit, offset })
   } catch (err) {
     console.error('History API error:', err)
     return NextResponse.json({ error: 'Failed to fetch history', items: [], total: 0 }, { status: 500 })
