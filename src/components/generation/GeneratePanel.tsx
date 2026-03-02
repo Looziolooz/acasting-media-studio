@@ -2,14 +2,14 @@
 import { useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { enhancePrompt, TASK_LABELS, STYLE_LABELS, LIGHTING_LABELS, COMPOSITION_LABELS } from '@/lib/prompt-engineer'
-import { PROVIDERS, SOCIAL_RATIOS, MAGICHOUR_CREDIT_COSTS } from '@/lib/ai-providers/config'
+import { PROVIDERS, SOCIAL_RATIOS } from '@/lib/ai-providers/config'
 import {
   Wand2, Send, ChevronDown, Image, Film, Sparkles,
-  RotateCcw, Copy, Check, Upload, X, Info, AlertCircle, Clock
+  RotateCcw, Copy, Check, Upload, X, AlertCircle
 } from 'lucide-react'
 import type {
   AcastingTask, ImageStyle, LightingPreset,
-  CompositionPreset, AspectRatio, GenerationJob, GenerationRequest
+  CompositionPreset, AspectRatio, GenerationJob
 } from '@/types'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -50,21 +50,6 @@ const RATIO_OPTIONS: [AspectRatio, string][] = [
   ['3:4',  '3:4'],
 ]
 
-// ---- prompt tips per provider ----
-const PROMPT_TIPS: Record<string, string> = {
-  pollinations: 'Pollinations: sii descrittivo. Includi stile, colori, soggetto. Es: "professional headshot, woman smiling, studio lighting, clean background"',
-  huggingface: 'HuggingFace: funziona bene con prompt dettagliati in inglese. Il primo avvio può richiedere 30-60 secondi.',
-  magichour: 'Magic Hour: per i video includi azione, ambiente e stile di camera. Es: "A confident actor walking toward camera, cinematic slow motion, warm golden lighting"',
-}
-
-// ---- stima tempo ----
-const TIME_ESTIMATES: Record<string, string> = {
-  pollinations: '~10-30s',
-  huggingface: '~15-60s (più lento al primo uso)',
-  magichour_image: '~15-30s',
-  magichour_video: '~60-120s',
-}
-
 export function GeneratePanel() {
   const { currentRequest, setCurrentRequest, addToQueue, usageStats } = useAppStore()
 
@@ -75,7 +60,6 @@ export function GeneratePanel() {
   const [copied, setCopied]         = useState(false)
   const [imageUrls, setImageUrls]   = useState<string[]>([])
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
-  const [showTips, setShowTips]     = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const task        = (currentRequest.task        ?? 'casting-post') as AcastingTask
@@ -92,20 +76,6 @@ export function GeneratePanel() {
   
   const canUploadImages = mediaType === 'video' && provider === 'magichour'
 
-  // Stima crediti per Magic Hour
-  const estimatedCredits = provider === 'magichour'
-    ? mediaType === 'video'
-      ? MAGICHOUR_CREDIT_COSTS['text-to-video-5s']
-      : MAGICHOUR_CREDIT_COSTS['ai-image']
-    : null
-
-  // Stima tempo
-  const estimatedTime = provider === 'magichour'
-    ? mediaType === 'video'
-      ? TIME_ESTIMATES.magichour_video
-      : TIME_ESTIMATES.magichour_image
-    : TIME_ESTIMATES[provider] ?? '~20s'
-
   const handleEnhance = useCallback(() => {
     if (!rawPrompt.trim()) return
     const result = enhancePrompt({ prompt: rawPrompt, task, style, lighting, composition, mediaType: mediaType as 'image' | 'video' })
@@ -115,34 +85,62 @@ export function GeneratePanel() {
   }, [rawPrompt, task, style, lighting, composition, mediaType, setCurrentRequest])
 
   const handleGenerate = async () => {
-    if (!rawPrompt.trim() && imageUrls.length === 0) return
+    const promptText = rawPrompt.trim()
+    if (!promptText && imageUrls.length === 0) return
+
     setGenerating(true)
     setErrorMsg(null)
 
-    const finalPrompt = showEnhanced && enhanced ? enhanced : rawPrompt
+    const finalPrompt = showEnhanced && enhanced ? enhanced : promptText
     const jobId = uuidv4()
 
-    // FIX: Costruisci la request esplicitamente con TUTTI i campi required
-    const requestBody: GenerationRequest = {
-      prompt: rawPrompt,
-      enhancedPrompt: finalPrompt !== rawPrompt ? finalPrompt : undefined,
-      provider: provider as GenerationRequest['provider'],
-      model: currentRequest.model ?? 'flux',
-      mediaType: mediaType as GenerationRequest['mediaType'],
-      task: task,
-      style: style,
-      lighting: lighting,
-      composition: composition,
-      aspectRatio: aspectRatio,
-      width: currentRequest.width,
-      height: currentRequest.height,
-      seed: currentRequest.seed,
-      imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+    // ============================================================
+    // FIX: Build the request body as a plain object — NOT using spread
+    // of currentRequest which is Partial and may have missing fields.
+    // Every field is explicitly set with a guaranteed value.
+    // ============================================================
+    const requestBody: Record<string, unknown> = {
+      prompt:         promptText,
+      enhancedPrompt: finalPrompt !== promptText ? finalPrompt : undefined,
+      provider:       provider,
+      model:          currentRequest.model ?? 'flux',
+      mediaType:      mediaType,
+      task:           task,
+      style:          style,
+      lighting:       lighting,
+      composition:    composition,
+      aspectRatio:    aspectRatio,
     }
+
+    // Only add optional fields if they have values
+    if (currentRequest.width)  requestBody.width  = currentRequest.width
+    if (currentRequest.height) requestBody.height = currentRequest.height
+    if (currentRequest.seed)   requestBody.seed   = currentRequest.seed
+    if (imageUrls.length > 0)  requestBody.imageUrls = imageUrls
+
+    // DEBUG: Log what we're sending
+    console.log('=== SENDING TO /api/generate ===')
+    console.log('prompt:', JSON.stringify(requestBody.prompt))
+    console.log('provider:', requestBody.provider)
+    console.log('mediaType:', requestBody.mediaType)
+    console.log('all keys:', Object.keys(requestBody))
+    console.log('================================')
 
     const job: GenerationJob = {
       id: jobId,
-      request: requestBody,
+      request: {
+        prompt: promptText,
+        enhancedPrompt: finalPrompt !== promptText ? finalPrompt : undefined,
+        provider: provider as any,
+        model: (currentRequest.model ?? 'flux') as string,
+        mediaType: mediaType as any,
+        task: task as any,
+        style: style as any,
+        lighting: lighting as any,
+        composition: composition as any,
+        aspectRatio: aspectRatio as any,
+        imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+      },
       status: 'processing',
       createdAt: new Date(),
     }
@@ -150,13 +148,17 @@ export function GeneratePanel() {
     addToQueue(job)
 
     try {
+      const bodyJson = JSON.stringify(requestBody)
+      console.log('Final JSON body length:', bodyJson.length)
+
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        body: bodyJson,
       })
 
       const data = await res.json()
+      console.log('Response:', res.status, data)
 
       if (res.ok && data.generation) {
         useAppStore.getState().updateJob(jobId, {
@@ -166,12 +168,11 @@ export function GeneratePanel() {
           completedAt: data.needsPolling ? undefined : new Date(),
         })
 
-        // Se il job è ancora in processing (Magic Hour video), inizia polling
         if (data.needsPolling && data.generation.id) {
           pollForCompletion(jobId, data.generation.id)
         }
       } else {
-        const errMessage = data.error ?? 'Errore sconosciuto'
+        const errMessage = data.error ?? 'Unknown error'
         useAppStore.getState().updateJob(jobId, {
           status: 'failed',
           errorMessage: errMessage,
@@ -179,7 +180,7 @@ export function GeneratePanel() {
         setErrorMsg(errMessage)
       }
     } catch (err) {
-      const errMessage = err instanceof Error ? err.message : 'Errore di rete'
+      const errMessage = err instanceof Error ? err.message : 'Network error'
       useAppStore.getState().updateJob(jobId, {
         status: 'failed',
         errorMessage: errMessage,
@@ -190,9 +191,8 @@ export function GeneratePanel() {
     }
   }
 
-  // Polling per Magic Hour video che non completano in tempo
   const pollForCompletion = async (jobId: string, generationId: string) => {
-    const maxPolls = 24 // 24 × 5s = 2 minuti
+    const maxPolls = 24
     for (let i = 0; i < maxPolls; i++) {
       await new Promise((r) => setTimeout(r, 5000))
       try {
@@ -208,14 +208,9 @@ export function GeneratePanel() {
           return
         }
       } catch {
-        // Continua polling
+        // continue
       }
     }
-    // Timeout — segnala all'utente
-    useAppStore.getState().updateJob(jobId, {
-      status: 'failed',
-      errorMessage: 'Il video sta impiegando più del previsto. Controlla la Gallery tra qualche minuto.',
-    })
   }
 
   const copyEnhanced = () => {
@@ -229,7 +224,6 @@ export function GeneratePanel() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
-
     Array.from(files).forEach((file) => {
       if (imageUrls.length >= 5) return
       const reader = new FileReader()
@@ -275,46 +269,18 @@ export function GeneratePanel() {
           >
             {t === 'image' ? <Image size={16} /> : <Film size={16} />}
             {t === 'image' ? 'Image' : 'Video'}
-            {t === 'video' && (
-              <span className="text-[9px] opacity-60 ml-1">(Magic Hour)</span>
-            )}
           </button>
         ))}
       </div>
 
       {/* Prompt input */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label htmlFor="prompt" className="text-xs text-white/40 uppercase tracking-wider">
-            Prompt
-          </label>
-          <button
-            onClick={() => setShowTips(!showTips)}
-            className="flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors"
-          >
-            <Info size={10} />
-            Tips
-          </button>
-        </div>
-
-        {showTips && (
-          <div className="p-2.5 rounded-lg bg-cyan-500/8 border border-cyan-500/15">
-            <p className="text-[10px] text-cyan-300/70 leading-relaxed">
-              {PROMPT_TIPS[provider] ?? 'Sii il più descrittivo possibile. Includi soggetto, azione, ambiente, stile.'}
-            </p>
-          </div>
-        )}
-
+      <div className="space-y-2">
         <textarea
           id="prompt"
           name="prompt"
           value={rawPrompt}
           onChange={(e) => setRawPrompt(e.target.value)}
-          placeholder={
-            mediaType === 'video'
-              ? 'Es: A confident young actor walking toward camera on a Stockholm street, cinematic slow motion, warm golden hour lighting...'
-              : 'Es: Professional headshot of a smiling woman, clean studio background, soft lighting, casting agency quality...'
-          }
+          placeholder="Describe what you want to create..."
           rows={3}
           className="w-full glass rounded-xl px-4 py-3 text-sm text-white/80 placeholder-white/20
             focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/30
@@ -326,7 +292,7 @@ export function GeneratePanel() {
       {canUploadImages && (
         <div className="space-y-1.5">
           <label htmlFor="imageUpload" className="text-xs text-white/40 uppercase tracking-wider">
-            Upload Image (opzionale - per image-to-video)
+            Upload Images (optional - for image-to-video)
           </label>
           <input
             type="file"
@@ -363,7 +329,7 @@ export function GeneratePanel() {
             )}
           </div>
           <p className="text-[10px] text-white/30">
-            Carica un&apos;immagine per animarla. Lascia vuoto per text-to-video.
+            Upload up to 5 images to animate. Leave empty for text-to-video.
           </p>
         </div>
       )}
@@ -443,38 +409,28 @@ export function GeneratePanel() {
                     </span>
                   </div>
                   <p className="text-[9px] text-white/40 leading-tight">
-                    {p.id === 'pollinations'
-                      ? 'Illimitato'
-                      : p.id === 'huggingface'
-                      ? 'Crediti HF gratuiti'
-                      : `~${estimatedCredits ?? '?'} crediti`}
+                    {p.dailyLimit
+                      ? `${usage?.dailyUsed ?? 0}/${p.dailyLimit} today`
+                      : p.monthlyLimit
+                      ? `${usage?.monthlyUsed ?? 0}/${p.monthlyLimit} month`
+                      : 'Unlimited'}
                   </p>
+                  {(p.dailyLimit || p.monthlyLimit) && (
+                    <div className="mt-2 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, usage?.percentageDaily ?? usage?.percentageMonthly ?? 0)}%`,
+                          background: p.color,
+                        }}
+                      />
+                    </div>
+                  )}
                 </button>
               )
             })}
         </div>
       </div>
-
-      {/* Pre-generation info bar */}
-      {rawPrompt.trim() && (
-        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/3 border border-white/5">
-          <div className="flex items-center gap-3 text-[10px] text-white/40">
-            <span className="flex items-center gap-1">
-              <Clock size={10} />
-              {estimatedTime}
-            </span>
-            {estimatedCredits !== null && (
-              <span className="flex items-center gap-1">
-                <Sparkles size={10} />
-                ~{estimatedCredits} crediti
-              </span>
-            )}
-          </div>
-          <span className="text-[10px] text-white/25">
-            {selectedProvider?.name}
-          </span>
-        </div>
-      )}
 
       {/* Action buttons */}
       <div className="flex gap-2 pt-2">
@@ -500,7 +456,7 @@ export function GeneratePanel() {
           {generating ? (
             <>
               <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Generating...</span>
+              <span>Creating...</span>
             </>
           ) : (
             <>
