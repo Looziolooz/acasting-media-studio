@@ -5,7 +5,7 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'pollinations',
     name: 'Pollinations.ai',
     color: '#22d3ee',  // cyan
-    description: 'Open source, illimitato, nessuna API key. Solo immagini.',
+    description: 'Open source, unlimited, no API key. Images only.',
     mediaTypes: ['image'],
     monthlyLimit: null,
     dailyLimit: null,
@@ -32,7 +32,7 @@ export const PROVIDERS: Record<string, Provider> = {
       },
       {
         id: 'turbo',
-        name: 'SDXL Turbo (veloce)',
+        name: 'SDXL Turbo (fast)',
         mediaType: 'image',
         defaultWidth: 1024,
         defaultHeight: 1024,
@@ -44,7 +44,7 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'huggingface',
     name: 'Hugging Face',
     color: '#fbbf24',  // amber
-    description: 'Crediti iniziali gratuiti. Attenzione: si esauriscono.',
+    description: 'Free initial credits. Warning: they run out.',
     mediaTypes: ['image'],
     monthlyLimit: null,
     dailyLimit: null,
@@ -69,7 +69,7 @@ export const PROVIDERS: Record<string, Provider> = {
       },
       {
         id: 'runwayml/stable-diffusion-v1-5',
-        name: 'SD v1.5 (economico)',
+        name: 'SD v1.5 (economical)',
         mediaType: 'image',
         defaultWidth: 512,
         defaultHeight: 512,
@@ -81,7 +81,7 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'magichour',
     name: 'Magic Hour',
     color: '#a78bfa',  // violet
-    description: '400 crediti signup + 100 crediti/giorno. Video + immagini.',
+    description: '400 signup credits + 100 credits/day. Video + Images.',
     mediaTypes: ['image', 'video'],
     monthlyLimit: null,
     dailyLimit: 100,

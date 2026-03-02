@@ -1,11 +1,11 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { enhancePrompt, TASK_LABELS, STYLE_LABELS, LIGHTING_LABELS, COMPOSITION_LABELS } from '@/lib/prompt-engineer'
 import { PROVIDERS, SOCIAL_RATIOS } from '@/lib/ai-providers/config'
 import {
   Wand2, Send, ChevronDown, Image, Film, Sparkles,
-  RotateCcw, Copy, Check
+  RotateCcw, Copy, Check, Upload, X
 } from 'lucide-react'
 import type {
   AcastingTask, ImageStyle, LightingPreset,
@@ -62,6 +62,8 @@ export function GeneratePanel() {
   const [showEnhanced, setShow]     = useState(false)
   const [generating, setGenerating] = useState(false)
   const [copied, setCopied]         = useState(false)
+  const [imageUrls, setImageUrls]   = useState<string[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const task        = (currentRequest.task        ?? 'casting-post') as AcastingTask
   const style       = (currentRequest.style       ?? 'photorealistic') as ImageStyle
@@ -74,6 +76,9 @@ export function GeneratePanel() {
   const selectedProvider = PROVIDERS[provider]
   const usageForProvider = usageStats.find((s) => s.providerId === provider)
   const isExhausted = usageForProvider?.level === 'exhausted'
+  
+  const canUploadImages = mediaType === 'video' && provider === 'magichour'
+  const needsImages = canUploadImages
 
   const handleEnhance = useCallback(() => {
     if (!rawPrompt.trim()) return
@@ -85,7 +90,7 @@ export function GeneratePanel() {
   }, [rawPrompt, task, style, lighting, composition, mediaType, setCurrentRequest])
 
   const handleGenerate = async () => {
-    if (!rawPrompt.trim()) return
+    if (!rawPrompt.trim() && imageUrls.length === 0) return
     setGenerating(true)
 
     const finalPrompt = showEnhanced && enhanced ? enhanced : rawPrompt
@@ -105,6 +110,7 @@ export function GeneratePanel() {
         lighting,
         composition,
         aspectRatio,
+        imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
       },
       status: 'processing',
       createdAt: new Date(),
@@ -151,6 +157,26 @@ export function GeneratePanel() {
     }
   }
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    Array.from(files).forEach((file) => {
+      if (imageUrls.length >= 5) return
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        if (ev.target?.result) {
+          setImageUrls(prev => [...prev, ev.target!.result as string])
+        }
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const removeImage = (index: number) => {
+    setImageUrls(prev => prev.filter((_, i) => i !== index))
+  }
+
   return (
     <div className="space-y-4">
       {/* Media type toggle */}
@@ -184,6 +210,50 @@ export function GeneratePanel() {
             resize-none"
         />
       </div>
+
+      {/* Image upload for video generation */}
+      {canUploadImages && (
+        <div className="space-y-1.5">
+          <label className="text-xs text-white/40 uppercase tracking-wider">
+            Upload Images (optional - for image-to-video)
+          </label>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImageUpload}
+            accept="image/*"
+            multiple
+            className="hidden"
+          />
+          <div className="grid grid-cols-5 gap-2">
+            {imageUrls.map((url, index) => (
+              <div key={index} className="relative aspect-square rounded-lg overflow-hidden glass">
+                <img src={url} alt={`Upload ${index + 1}`} className="w-full h-full object-cover" />
+                <button
+                  onClick={() => removeImage(index)}
+                  className="absolute top-1 right-1 p-1 rounded-full bg-black/50 text-white/70 hover:text-white"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            {imageUrls.length < 5 && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="aspect-square rounded-lg border border-dashed border-white/20 
+                  flex flex-col items-center justify-center text-white/40 hover:text-white/70 
+                  hover:border-white/40 transition-all"
+              >
+                <Upload size={16} />
+                <span className="text-[10px] mt-1">{imageUrls.length}/5</span>
+              </button>
+            )}
+          </div>
+          <p className="text-[10px] text-white/30">
+            Upload up to 5 images to animate. Leave empty for text-to-video.
+          </p>
+        </div>
+      )}
 
       {/* Task & style row */}
       <div className="grid grid-cols-2 gap-3">
@@ -323,7 +393,7 @@ export function GeneratePanel() {
 
         <button
           onClick={handleGenerate}
-          disabled={!rawPrompt.trim() || generating || isExhausted}
+          disabled={(!rawPrompt.trim() && imageUrls.length === 0) || generating || isExhausted}
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
             text-sm font-semibold bg-violet-600 hover:bg-violet-500 text-white
             transition-all disabled:opacity-40 disabled:cursor-not-allowed

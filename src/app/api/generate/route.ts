@@ -29,7 +29,7 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
 // ============================================================
 async function generateHuggingFace(req: GenerationRequest): Promise<string> {
   const apiKey = process.env.HUGGINGFACE_API_KEY
-  if (!apiKey) throw new Error('HUGGINGFACE_API_KEY non configurata')
+  if (!apiKey) throw new Error('HUGGINGFACE_API_KEY not configured')
 
   const dims = ASPECT_RATIO_DIMENSIONS[req.aspectRatio]?.md ?? { width: 1024, height: 1024 }
   const model = req.model ?? 'black-forest-labs/FLUX.1-dev'
@@ -70,31 +70,58 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
 // ============================================================
 async function generateMagicHour(req: GenerationRequest): Promise<{ url: string; jobId: string }> {
   const apiKey = process.env.MAGICHOUR_API_KEY
-  if (!apiKey) throw new Error('MAGICHOUR_API_KEY non configurata')
+  if (!apiKey) throw new Error('MAGICHOUR_API_KEY not configured')
 
   const isVideo = req.mediaType === 'video'
+  const hasImages = req.imageUrls && req.imageUrls.length > 0
 
   if (isVideo) {
-    // Step 1: submit job
-    const submitRes = await fetch('https://api.magichour.ai/v1/text-to-video', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name: `acasting-${Date.now()}`,
-        style: {
+    let submitRes: Response
+    let jobId: string
+
+    if (hasImages) {
+      // Image-to-video: use first image as the source
+      const imageUrl = req.imageUrls![0]
+      submitRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: `acasting-img2vid-${Date.now()}`,
+          image_url: imageUrl,
           prompt: req.enhancedPrompt ?? req.prompt,
+          output: {
+            width: 1280,
+            height: 720,
+            frame_rate: 24,
+            duration: 5,
+          },
+        }),
+      })
+    } else {
+      // Text-to-video
+      submitRes = await fetch('https://api.magichour.ai/v1/text-to-video', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
         },
-        output: {
-          width: 1280,
-          height: 720,
-          frame_rate: 24,
-          duration: 5,
-        },
-      }),
-    })
+        body: JSON.stringify({
+          name: `acasting-${Date.now()}`,
+          style: {
+            prompt: req.enhancedPrompt ?? req.prompt,
+          },
+          output: {
+            width: 1280,
+            height: 720,
+            frame_rate: 24,
+            duration: 5,
+          },
+        }),
+      })
+    }
 
     if (!submitRes.ok) {
       const errText = await submitRes.text()
@@ -102,7 +129,7 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
     }
 
     const submitData = await submitRes.json()
-    const jobId: string = submitData.id
+    jobId = submitData.id
 
     // Step 2: poll for completion (max 120s)
     const maxAttempts = 24
@@ -124,7 +151,7 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         throw new Error(`Magic Hour video failed: ${statusData.error_message ?? 'unknown'}`)
       }
     }
-    throw new Error('Magic Hour: timeout dopo 120 secondi')
+    throw new Error('Magic Hour: timeout after 120 seconds')
 
   } else {
     // Image generation
@@ -262,7 +289,7 @@ export async function POST(request: NextRequest) {
       resultUrl = result.url
       providerJobId = result.jobId
     } else {
-      return NextResponse.json({ error: `Provider sconosciuto: ${provider}` }, { status: 400 })
+      return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 })
     }
 
     // Update DB
@@ -281,7 +308,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, generation: updated })
 
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Errore sconosciuto'
+    const message = err instanceof Error ? err.message : 'Unknown error'
 
     await prisma.generation.update({
       where: { id: generation.id },

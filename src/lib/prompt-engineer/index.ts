@@ -131,42 +131,42 @@ export function enhancePrompt(params: {
   }
 }
 
-// ---- task labels in Italian ----
+// ---- task labels ----
 export const TASK_LABELS: Record<AcastingTask, string> = {
-  'casting-post':     '📋 Post Casting',
-  'video-teaser':     '🎬 Video Teaser',
-  'social-thumbnail': '📱 Thumbnail Social',
-  'actor-headshot':   '🎭 Headshot Attore',
-  'scene-backdrop':   '🎨 Scenario / Sfondo',
-  'product-showcase': '📦 Product Showcase',
-  'advertising':      '📣 Pubblicità',
-  'abstract':         '✨ Astratto',
+  'casting-post':     'Casting Post',
+  'video-teaser':     'Video Teaser',
+  'social-thumbnail': 'Social Thumbnail',
+  'actor-headshot':   'Actor Headshot',
+  'scene-backdrop':   'Scene Background',
+  'product-showcase': 'Product Showcase',
+  'advertising':      'Advertising',
+  'abstract':         'Abstract',
 }
 
 export const STYLE_LABELS: Record<ImageStyle, string> = {
-  'photorealistic': 'Fotorealistico',
-  'cinematic':      'Cinematografico',
+  'photorealistic': 'Photorealistic',
+  'cinematic':      'Cinematic',
   'digital-art':    'Digital Art',
-  'editorial':      'Editoriale',
+  'editorial':      'Editorial',
   'minimal-clean':  'Minimal / Clean',
-  'dramatic':       'Drammatico',
+  'dramatic':       'Dramatic',
   'anime':          'Anime',
-  'watercolor':     'Acquerello',
+  'watercolor':     'Watercolor',
 }
 
 export const LIGHTING_LABELS: Record<LightingPreset, string> = {
   'golden-hour':       'Golden Hour',
   'studio-light':      'Studio Light',
-  'dramatic-shadows':  'Luci Drammatiche',
+  'dramatic-shadows':  'Dramatic Shadows',
   'neon-glow':         'Neon / Glow',
-  'natural-soft':      'Naturale Soft',
-  'backlit':           'Controluce',
+  'natural-soft':      'Natural Soft',
+  'backlit':           'Backlit',
 }
 
 export const COMPOSITION_LABELS: Record<CompositionPreset, string> = {
-  'rule-of-thirds':    'Regola dei Terzi',
-  'centered-portrait': 'Centrato / Portrait',
+  'rule-of-thirds':    'Rule of Thirds',
+  'centered-portrait': 'Centered / Portrait',
   'wide-shot':         'Wide Shot',
   'close-up':          'Close-up',
-  'birds-eye':         "Vista dall'alto",
+  'birds-eye':         'Bird\'s Eye',
 }

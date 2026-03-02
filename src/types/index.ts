@@ -41,11 +41,11 @@ export type GenerationStatus = 'queued' | 'processing' | 'completed' | 'failed'
 export type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
 
 export type AcastingTask =
-  | 'casting-post'        // Post immagini per casting jobs
-  | 'video-teaser'        // Video teaser per annunci
-  | 'social-thumbnail'    // Thumbnail social
-  | 'actor-headshot'      // Headshot stilizzati attori
-  | 'scene-backdrop'      // Sfondi/scenari
+  | 'casting-post'        // Casting job image posts
+  | 'video-teaser'        // Video teaser for announcements
+  | 'social-thumbnail'    // Social thumbnail
+  | 'actor-headshot'      // Actor headshots
+  | 'scene-backdrop'      // Backgrounds/scenes
   | 'product-showcase'
   | 'advertising'
   | 'abstract'
@@ -89,6 +89,7 @@ export interface GenerationRequest {
   width?: number
   height?: number
   seed?: number
+  imageUrls?: string[]  // For image-to-video generation
 }
 
 export interface GenerationJob {
