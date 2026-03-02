@@ -4,6 +4,7 @@ import { ASPECT_RATIO_DIMENSIONS } from '@/lib/ai-providers/config'
 import type { GenerationRequest } from '@/types'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60 // Aumenta il timeout per Vercel Pro (Hobby max 10s)
 
 // ============================================================
 // POLLINATIONS - fully free, no API key
@@ -18,12 +19,33 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
   const encoded = encodeURIComponent(req.enhancedPrompt ?? req.prompt)
   const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
 
-  // Pollinations is a GET request that returns the image directly
-  // We just return the URL — client can use it as <img src>
-  // Validate it responds
-  const res = await fetch(url, { method: 'HEAD' })
-  if (!res.ok) throw new Error(`Pollinations error: ${res.status}`)
-  return url
+  // FIX: Pollinations genera le immagini on-the-fly alla prima richiesta GET.
+  // Una HEAD request fallisce perché l'immagine non esiste ancora.
+  // Facciamo un GET completo con timeout per triggerare la generazione.
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 45000) // 45s timeout
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      // GET (non HEAD) perché Pollinations genera solo al primo GET
+    })
+    clearTimeout(timeout)
+
+    if (!res.ok) {
+      throw new Error(`Pollinations error: ${res.status} ${res.statusText}`)
+    }
+
+    return url
+  } catch (err: unknown) {
+    // Se è un abort (timeout), l'immagine potrebbe essere ancora in generazione
+    // Ritorniamo l'URL comunque — il client può caricarla dopo
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.warn('Pollinations: generation timed out, returning URL for client-side loading')
+      return url
+    }
+    throw err
+  }
 }
 
 // ============================================================
@@ -36,35 +58,61 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
   const dims = ASPECT_RATIO_DIMENSIONS[req.aspectRatio]?.md ?? { width: 1024, height: 1024 }
   const model = req.model ?? 'black-forest-labs/FLUX.1-dev'
 
-  const response = await fetch(
-    `https://api-inference.huggingface.co/models/${model}`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        inputs: req.enhancedPrompt ?? req.prompt,
-        parameters: {
-          width:  req.width  ?? dims.width,
-          height: req.height ?? dims.height,
-        },
-      }),
-    }
-  )
+  // FIX: Retry per gestire il model loading (HF ritorna 503 quando il modello è cold)
+  const maxRetries = 2
+  let lastError = ''
 
-  if (!response.ok) {
-    const errText = await response.text()
-    throw new Error(`HuggingFace error ${response.status}: ${errText}`)
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch(
+      `https://api-inference.huggingface.co/models/${model}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputs: req.enhancedPrompt ?? req.prompt,
+          parameters: {
+            width:  req.width  ?? dims.width,
+            height: req.height ?? dims.height,
+          },
+        }),
+      }
+    )
+
+    // HuggingFace ritorna 503 quando il modello è in caricamento — aspetta e riprova
+    if (response.status === 503) {
+      const data = await response.json().catch(() => ({}))
+      const waitTime = data.estimated_time
+        ? Math.min(data.estimated_time * 1000, 20000)
+        : 10000
+      lastError = `Model loading (attempt ${attempt + 1}/${maxRetries + 1})`
+      console.log(`HuggingFace: model loading, waiting ${waitTime}ms...`)
+
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, waitTime))
+        continue
+      }
+      throw new Error(
+        `HuggingFace: model still loading after ${maxRetries + 1} attempts. Try again in a minute.`
+      )
+    }
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`HuggingFace error ${response.status}: ${errText}`)
+    }
+
+    // Returns binary blob → convert to base64 data URL
+    const blob   = await response.blob()
+    const buffer = Buffer.from(await blob.arrayBuffer())
+    const base64 = buffer.toString('base64')
+    const mime   = blob.type || 'image/jpeg'
+    return `data:${mime};base64,${base64}`
   }
 
-  // Returns binary blob → convert to base64 data URL
-  const blob   = await response.blob()
-  const buffer = Buffer.from(await blob.arrayBuffer())
-  const base64 = buffer.toString('base64')
-  const mime   = blob.type || 'image/jpeg'
-  return `data:${mime};base64,${base64}`
+  throw new Error(`HuggingFace: failed after retries. ${lastError}`)
 }
 
 // ============================================================
@@ -79,7 +127,6 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
 
   if (isVideo) {
     let submitRes: Response
-    let jobId: string
 
     if (hasImages) {
       // Image-to-video: use first image as the source
@@ -133,10 +180,12 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
     }
 
     const submitData = await submitRes.json()
-    jobId = submitData.id
+    const jobId = submitData.id
 
-    // Step 2: poll for completion (max 120s)
-    const maxAttempts = 24
+    // FIX: Ridotto il polling per rispettare i limiti di timeout Vercel
+    // Hobby: 10s, Pro: 60s — max 8 tentativi × 5s = 40s (sicuro per Pro)
+    // Per job più lunghi, il webhook aggiornerà il DB
+    const maxAttempts = 8
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 5000))
 
@@ -155,7 +204,10 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         throw new Error(`Magic Hour video failed: ${statusData.error_message ?? 'unknown'}`)
       }
     }
-    throw new Error('Magic Hour: timeout after 120 seconds')
+
+    // FIX: Invece di lanciare errore, ritorna il jobId così il webhook può completare
+    console.warn(`Magic Hour video ${jobId}: still processing after polling, deferring to webhook`)
+    return { url: '', jobId }
 
   } else {
     // Image generation
@@ -183,8 +235,8 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
     const imgData = await imgRes.json()
     const jobId: string = imgData.id
 
-    // Poll for completion
-    for (let i = 0; i < 20; i++) {
+    // Poll for completion (immagini sono più veloci dei video)
+    for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 3000))
       const statusRes = await fetch(`https://api.magichour.ai/v1/image-projects/${jobId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
@@ -199,7 +251,10 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         throw new Error(`Magic Hour image failed: ${statusData.error_message}`)
       }
     }
-    throw new Error('Magic Hour image: timeout')
+
+    // Anche per le immagini, se non completa in tempo affidati al webhook
+    console.warn(`Magic Hour image ${jobId}: still processing after polling, deferring to webhook`)
+    return { url: '', jobId }
   }
 }
 
@@ -277,25 +332,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing required field: mediaType' }, { status: 400 })
   }
 
-  // Create DB record
-  const generation = await prisma.generation.create({
-    data: {
-      prompt:        req.prompt,
-      enhancedPrompt: req.enhancedPrompt,
-      provider:      req.provider,
-      model:         req.model ?? 'flux',
-      mediaType:     req.mediaType,
-      task:          req.task ?? 'general',
-      style:         req.style ?? 'natural',
-      lighting:      req.lighting ?? 'natural',
-      composition:   req.composition ?? 'auto',
-      aspectRatio:   req.aspectRatio ?? '16:9',
-      width:         req.width,
-      height:        req.height,
-      seed:          req.seed,
-      status:        'processing',
-    },
-  })
+  // FIX: Wrappa la creazione DB in try-catch con messaggio esplicito
+  let generation
+  try {
+    generation = await prisma.generation.create({
+      data: {
+        prompt:        req.prompt,
+        enhancedPrompt: req.enhancedPrompt,
+        provider:      req.provider,
+        model:         req.model ?? 'flux',
+        mediaType:     req.mediaType,
+        task:          req.task ?? 'general',
+        style:         req.style ?? 'natural',
+        lighting:      req.lighting ?? 'natural',
+        composition:   req.composition ?? 'auto',
+        aspectRatio:   req.aspectRatio ?? '16:9',
+        width:         req.width,
+        height:        req.height,
+        seed:          req.seed,
+        status:        'processing',
+      },
+    })
+  } catch (dbErr) {
+    console.error('Database error creating generation:', dbErr)
+    return NextResponse.json(
+      { error: 'Database connection error. Check DATABASE_URL and run prisma migrate deploy.' },
+      { status: 500 }
+    )
+  }
 
   try {
     let resultUrl: string
@@ -318,20 +382,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 })
     }
 
+    // FIX: Gestisci il caso in cui Magic Hour non ha completato in tempo (url vuoto)
+    const isStillProcessing = !resultUrl && providerJobId
+
     // Update DB
     const updated = await prisma.generation.update({
       where: { id: generation.id },
       data: {
-        status:       'completed',
-        resultUrl,
+        status:       isStillProcessing ? 'processing' : 'completed',
+        resultUrl:    resultUrl || null,
         providerJobId,
-        completedAt:  new Date(),
+        completedAt:  isStillProcessing ? undefined : new Date(),
       },
     })
 
     await trackUsage(provider)
 
-    return NextResponse.json({ success: true, generation: updated })
+    return NextResponse.json({
+      success: true,
+      generation: updated,
+      // Indica al client se deve fare polling per il completamento
+      needsPolling: isStillProcessing,
+    })
 
   } catch (err) {
     console.error('Generation error:', err)
