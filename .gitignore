@@ -1,1 +1,4 @@
 node_modules/@next/swc-win32-x64-msvc/
+
+.vercel
+.env*.local

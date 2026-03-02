@@ -58,7 +58,7 @@ const COMPOSITION_MODIFIERS: Record<CompositionPreset, string> = {
 const QUALITY_SUFFIX = ', masterpiece, best quality, professional grade, award-winning photography'
 
 // ---- provider suggestion logic ----
-function suggestProvider(task: AcastingTask, mediaType: 'image' | 'video'): {
+function suggestProvider(task: AcastingTask, style: ImageStyle, mediaType: 'image' | 'video'): {
   provider: ProviderId
   model: string
   reasoning: string
@@ -72,7 +72,7 @@ function suggestProvider(task: AcastingTask, mediaType: 'image' | 'video'): {
   }
 
   // For images: Pollinations for high-volume tasks, HF for quality-critical
-  if (task === 'actor-headshot' || task === 'editorial') {
+  if (task === 'actor-headshot' || style === 'editorial') {
     return {
       provider: 'huggingface',
       model: 'black-forest-labs/FLUX.1-dev',
@@ -112,7 +112,7 @@ export function enhancePrompt(params: {
     QUALITY_SUFFIX,
   ].join(', ')
 
-  const suggestion = suggestProvider(task, mediaType)
+  const suggestion = suggestProvider(task, style, mediaType)
 
   // Extract meaningful tags from the prompt
   const tags = [

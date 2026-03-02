@@ -98,11 +98,11 @@ export function HistoryPanel() {
               className="glass rounded-xl overflow-hidden group relative"
             >
               {/* Thumbnail */}
-              {item.resultUrl && item.mediaType !== 'video' ? (
+              {item.resultUrl && item.request.mediaType !== 'video' ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={item.resultUrl as string}
-                  alt={item.prompt as string}
+                  alt={item.request.prompt as string}
                   className="w-full aspect-square object-cover"
                   loading="lazy"
                 />
@@ -117,7 +117,7 @@ export function HistoryPanel() {
                 transition-opacity flex items-end p-2">
                 <div className="w-full">
                   <p className="text-[10px] text-white/70 mb-2 line-clamp-2">
-                    {item.prompt as string}
+                    {item.request.prompt as string}
                   </p>
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] text-white/30">
@@ -160,8 +160,8 @@ export function HistoryPanel() {
               <div className="absolute top-2 left-2">
                 <span className="flex items-center gap-1 text-[9px] text-white/60
                   bg-black/50 backdrop-blur-sm rounded px-1.5 py-0.5">
-                  {item.mediaType === 'video' ? <Film size={9} /> : <Image size={9} />}
-                  {item.provider as string}
+                  {item.request.mediaType === 'video' ? <Film size={9} /> : <Image size={9} />}
+                  {item.request.provider as string}
                 </span>
               </div>
             </div>

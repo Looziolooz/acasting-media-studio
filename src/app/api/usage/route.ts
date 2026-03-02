@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { PROVIDERS } from '@/lib/ai-providers/config'
 import type { ProviderUsageStats, UsageLevel } from '@/types'
 
+export const dynamic = 'force-dynamic'
+
 function getLevel(pct: number): UsageLevel {
   if (pct >= 100) return 'exhausted'
   if (pct >= 95)  return 'critical'
