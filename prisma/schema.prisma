@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Generation {
+  id             String   @id @default(cuid())
+  prompt         String
+  enhancedPrompt String?
+  provider       String
+  model          String
+  mediaType      String   // "image" | "video"
+  task           String
+  style          String
+  lighting       String
+  composition    String
+  aspectRatio    String
+  width          Int?
+  height         Int?
+  seed           Int?
+  status         String   @default("queued") // queued | processing | completed | failed
+  resultUrl      String?
+  thumbnailUrl   String?
+  errorMessage   String?
+  creditsUsed    Int?
+  providerJobId  String?  // for async providers (Magic Hour)
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+  @@index([task])
+}
+
+model ProviderUsage {
+  id           String   @id @default(cuid())
+  provider     String   @unique
+  dailyCount   Int      @default(0)
+  monthlyCount Int      @default(0)
+  totalCount   Int      @default(0)
+  lastUsed     DateTime @default(now())
+  dailyResetAt DateTime @default(now())
+  monthlyResetAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model QueueJob {
+  id            String   @id @default(cuid())
+  generationId  String   @unique
+  position      Int
+  status        String   @default("pending") // pending | processing | done | failed
+  startedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([status])
+  @@index([position])
+}
