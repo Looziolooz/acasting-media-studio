@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import type {
   AcastingTask, ImageStyle, LightingPreset,
-  CompositionPreset, AspectRatio, GenerationJob
+  CompositionPreset, AspectRatio, GenerationJob, GenerationRequest
 } from '@/types'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -59,6 +59,7 @@ export function GeneratePanel() {
   const [generating, setGenerating] = useState(false)
   const [copied, setCopied]         = useState(false)
   const [imageUrls, setImageUrls]   = useState<string[]>([])
+  const [errorMsg, setErrorMsg]     = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const task        = (currentRequest.task        ?? 'casting-post') as AcastingTask
@@ -88,26 +89,33 @@ export function GeneratePanel() {
   const handleGenerate = async () => {
     if (!rawPrompt.trim() && imageUrls.length === 0) return
     setGenerating(true)
+    setErrorMsg(null)
 
     const finalPrompt = showEnhanced && enhanced ? enhanced : rawPrompt
     const jobId = uuidv4()
 
+    // FIX: Costruisci la request esplicitamente con TUTTI i campi required
+    // invece di fare spread di currentRequest (che è Partial)
+    const requestBody: GenerationRequest = {
+      prompt: rawPrompt,
+      enhancedPrompt: finalPrompt !== rawPrompt ? finalPrompt : undefined,
+      provider: provider as GenerationRequest['provider'],
+      model: currentRequest.model ?? 'flux',
+      mediaType: mediaType as GenerationRequest['mediaType'],
+      task: task,
+      style: style,
+      lighting: lighting,
+      composition: composition,
+      aspectRatio: aspectRatio,
+      width: currentRequest.width,
+      height: currentRequest.height,
+      seed: currentRequest.seed,
+      imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+    }
+
     const job: GenerationJob = {
       id: jobId,
-      request: {
-        ...currentRequest as any,
-        prompt: rawPrompt,
-        enhancedPrompt: finalPrompt,
-        provider: provider as any,
-        model: currentRequest.model ?? 'flux',
-        mediaType: mediaType as any,
-        task,
-        style,
-        lighting,
-        composition,
-        aspectRatio,
-        imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
-      },
+      request: requestBody,
       status: 'processing',
       createdAt: new Date(),
     }
@@ -118,30 +126,63 @@ export function GeneratePanel() {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(job.request),
+        body: JSON.stringify(requestBody),
       })
 
       const data = await res.json()
 
       if (res.ok && data.generation) {
         useAppStore.getState().updateJob(jobId, {
-          status:    'completed',
+          status:    data.needsPolling ? 'processing' : 'completed',
           resultUrl: data.generation.resultUrl,
-          completedAt: new Date(),
+          providerJobId: data.generation.providerJobId,
+          completedAt: data.needsPolling ? undefined : new Date(),
         })
+
+        // Se il job è ancora in processing (Magic Hour video), inizia polling
+        if (data.needsPolling && data.generation.providerJobId) {
+          pollForCompletion(jobId, data.generation.id)
+        }
       } else {
+        const errMessage = data.error ?? 'Unknown error'
         useAppStore.getState().updateJob(jobId, {
           status: 'failed',
-          errorMessage: data.error ?? 'Unknown error',
+          errorMessage: errMessage,
         })
+        setErrorMsg(errMessage)
       }
     } catch (err) {
+      const errMessage = err instanceof Error ? err.message : 'Network error'
       useAppStore.getState().updateJob(jobId, {
         status: 'failed',
-        errorMessage: 'Network error',
+        errorMessage: errMessage,
       })
+      setErrorMsg(errMessage)
     } finally {
       setGenerating(false)
+    }
+  }
+
+  // Polling per Magic Hour video che non completano in tempo
+  const pollForCompletion = async (jobId: string, generationId: string) => {
+    const maxPolls = 30 // 30 * 5s = 2.5 minuti
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise((r) => setTimeout(r, 5000))
+      try {
+        const res = await fetch(`/api/history?status=completed&limit=1`)
+        const data = await res.json()
+        const found = data.items?.find((item: any) => item.id === generationId)
+        if (found && found.resultUrl) {
+          useAppStore.getState().updateJob(jobId, {
+            status: 'completed',
+            resultUrl: found.resultUrl,
+            completedAt: new Date(),
+          })
+          return
+        }
+      } catch {
+        // Continua polling
+      }
     }
   }
 
@@ -175,6 +216,18 @@ export function GeneratePanel() {
 
   return (
     <div className="space-y-4">
+      {/* Error banner */}
+      {errorMsg && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+          <X
+            size={14}
+            className="text-red-400 mt-0.5 cursor-pointer shrink-0"
+            onClick={() => setErrorMsg(null)}
+          />
+          <p className="text-xs text-red-300/80 leading-relaxed">{errorMsg}</p>
+        </div>
+      )}
+
       {/* Media type toggle - improved */}
       <div className="flex gap-2">
         {(['image', 'video'] as const).map((t) => (
