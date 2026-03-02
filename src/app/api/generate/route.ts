@@ -245,8 +245,14 @@ async function trackUsage(provider: string) {
 // ============================================================
 // ROUTE HANDLER
 // ============================================================
+function validateRequest(body: unknown): body is GenerationRequest {
+  if (!body || typeof body !== 'object') return false
+  const b = body as Record<string, unknown>
+  return typeof b.prompt === 'string' && b.prompt.length > 0
+}
+
 export async function POST(request: NextRequest) {
-  let body: GenerationRequest
+  let body: unknown
 
   try {
     body = await request.json()
@@ -254,24 +260,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { provider, mediaType } = body
+  if (!validateRequest(body)) {
+    return NextResponse.json({ error: 'Missing required field: prompt' }, { status: 400 })
+  }
+
+  const req = body as GenerationRequest
+  const { provider, mediaType } = req
+
+  if (!provider) {
+    return NextResponse.json({ error: 'Missing required field: provider' }, { status: 400 })
+  }
+
+  if (!mediaType) {
+    return NextResponse.json({ error: 'Missing required field: mediaType' }, { status: 400 })
+  }
 
   // Create DB record
   const generation = await prisma.generation.create({
     data: {
-      prompt:        body.prompt,
-      enhancedPrompt: body.enhancedPrompt,
-      provider,
-      model:         body.model,
-      mediaType,
-      task:          body.task,
-      style:         body.style,
-      lighting:      body.lighting,
-      composition:   body.composition,
-      aspectRatio:   body.aspectRatio,
-      width:         body.width,
-      height:        body.height,
-      seed:          body.seed,
+      prompt:        req.prompt,
+      enhancedPrompt: req.enhancedPrompt,
+      provider:      req.provider,
+      model:         req.model ?? 'flux',
+      mediaType:     req.mediaType,
+      task:          req.task ?? 'general',
+      style:         req.style ?? 'natural',
+      lighting:      req.lighting ?? 'natural',
+      composition:   req.composition ?? 'auto',
+      aspectRatio:   req.aspectRatio ?? '16:9',
+      width:         req.width,
+      height:        req.height,
+      seed:          req.seed,
       status:        'processing',
     },
   })
@@ -281,11 +300,11 @@ export async function POST(request: NextRequest) {
     let providerJobId: string | undefined
 
     if (provider === 'pollinations') {
-      resultUrl = await generatePollinations(body)
+      resultUrl = await generatePollinations(req)
     } else if (provider === 'huggingface') {
-      resultUrl = await generateHuggingFace(body)
+      resultUrl = await generateHuggingFace(req)
     } else if (provider === 'magichour') {
-      const result = await generateMagicHour(body)
+      const result = await generateMagicHour(req)
       resultUrl = result.url
       providerJobId = result.jobId
     } else {
@@ -308,12 +327,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, generation: updated })
 
   } catch (err) {
+    console.error('Generation error:', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
 
-    await prisma.generation.update({
-      where: { id: generation.id },
-      data: { status: 'failed', errorMessage: message },
-    })
+    try {
+      await prisma.generation.update({
+        where: { id: generation.id },
+        data: { status: 'failed', errorMessage: message },
+      })
+    } catch (updateErr) {
+      console.error('Failed to update generation status:', updateErr)
+    }
 
     return NextResponse.json({ error: message, generationId: generation.id }, { status: 500 })
   }
