@@ -4,7 +4,7 @@ import { ASPECT_RATIO_DIMENSIONS } from '@/lib/ai-providers/config'
 import type { GenerationRequest } from '@/types'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60 // Aumenta il timeout per Vercel Pro (Hobby max 10s)
+export const maxDuration = 60
 
 // ============================================================
 // POLLINATIONS - fully free, no API key
@@ -19,29 +19,22 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
   const encoded = encodeURIComponent(req.enhancedPrompt ?? req.prompt)
   const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
 
-  // FIX: Pollinations genera le immagini on-the-fly alla prima richiesta GET.
-  // Una HEAD request fallisce perché l'immagine non esiste ancora.
-  // Facciamo un GET completo con timeout per triggerare la generazione.
+  // FIX: Pollinations genera immagini on-the-fly alla prima richiesta GET.
+  // HEAD fallisce perché l'immagine non esiste ancora.
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 45000) // 45s timeout
+    const timeout = setTimeout(() => controller.abort(), 45000)
 
-    const res = await fetch(url, {
-      signal: controller.signal,
-      // GET (non HEAD) perché Pollinations genera solo al primo GET
-    })
+    const res = await fetch(url, { signal: controller.signal })
     clearTimeout(timeout)
 
     if (!res.ok) {
       throw new Error(`Pollinations error: ${res.status} ${res.statusText}`)
     }
-
     return url
   } catch (err: unknown) {
-    // Se è un abort (timeout), l'immagine potrebbe essere ancora in generazione
-    // Ritorniamo l'URL comunque — il client può caricarla dopo
     if (err instanceof Error && err.name === 'AbortError') {
-      console.warn('Pollinations: generation timed out, returning URL for client-side loading')
+      console.warn('Pollinations: timed out, returning URL for client-side loading')
       return url
     }
     throw err
@@ -58,7 +51,6 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
   const dims = ASPECT_RATIO_DIMENSIONS[req.aspectRatio]?.md ?? { width: 1024, height: 1024 }
   const model = req.model ?? 'black-forest-labs/FLUX.1-dev'
 
-  // FIX: Retry per gestire il model loading (HF ritorna 503 quando il modello è cold)
   const maxRetries = 2
   let lastError = ''
 
@@ -81,7 +73,7 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
       }
     )
 
-    // HuggingFace ritorna 503 quando il modello è in caricamento — aspetta e riprova
+    // HuggingFace 503 = model loading → retry
     if (response.status === 503) {
       const data = await response.json().catch(() => ({}))
       const waitTime = data.estimated_time
@@ -95,7 +87,7 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
         continue
       }
       throw new Error(
-        `HuggingFace: model still loading after ${maxRetries + 1} attempts. Try again in a minute.`
+        `HuggingFace: model still loading after ${maxRetries + 1} attempts. Riprova tra un minuto.`
       )
     }
 
@@ -104,7 +96,6 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
       throw new Error(`HuggingFace error ${response.status}: ${errText}`)
     }
 
-    // Returns binary blob → convert to base64 data URL
     const blob   = await response.blob()
     const buffer = Buffer.from(await blob.arrayBuffer())
     const base64 = buffer.toString('base64')
@@ -116,21 +107,48 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
 }
 
 // ============================================================
-// MAGIC HOUR - 400 signup + 100 daily credits, video + image
+// MAGIC HOUR - crediti: 400 signup + 100/giorno reclamabili
+// Un video 5s = ~150 crediti, un'immagine = ~5-10 crediti
+//
+// DOCUMENTAZIONE UFFICIALE (docs.magichour.ai):
+// - Text-to-Video: POST /v1/text-to-video
+//   { end_seconds, orientation, style: { prompt }, name, resolution }
+// - Image-to-Video: POST /v1/image-to-video
+//   { end_seconds, assets: { image_file_path }, style: { prompt }, name, resolution }
+// - AI Images: POST /v1/ai-image-generator
+//   { style: { prompt }, name, image_count, orientation, resolution }
 // ============================================================
+
+function getOrientation(aspectRatio: string): 'landscape' | 'portrait' | 'square' {
+  if (aspectRatio === '16:9' || aspectRatio === '4:3') return 'landscape'
+  if (aspectRatio === '9:16' || aspectRatio === '3:4') return 'portrait'
+  return 'square'
+}
+
+function getResolution(mediaType: string): string {
+  // Free plan: max 512px. Creator+: 1080p.
+  // Usiamo 480p per sicurezza sul piano gratuito
+  return mediaType === 'video' ? '480p' : '480p'
+}
+
 async function generateMagicHour(req: GenerationRequest): Promise<{ url: string; jobId: string }> {
   const apiKey = process.env.MAGICHOUR_API_KEY
   if (!apiKey) throw new Error('MAGICHOUR_API_KEY not configured')
 
   const isVideo = req.mediaType === 'video'
   const hasImages = req.imageUrls && req.imageUrls.length > 0
+  const prompt = req.enhancedPrompt ?? req.prompt
+  const orientation = getOrientation(req.aspectRatio)
+  const resolution = getResolution(req.mediaType)
 
   if (isVideo) {
     let submitRes: Response
 
     if (hasImages) {
-      // Image-to-video: use first image as the source
+      // Image-to-Video
+      // L'immagine deve essere un URL accessibile o un file caricato via /v1/files/upload-urls
       const imageUrl = req.imageUrls![0]
+
       submitRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
         method: 'POST',
         headers: {
@@ -139,21 +157,19 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         },
         body: JSON.stringify({
           name: `acasting-img2vid-${Date.now()}`,
-          prompt: req.enhancedPrompt ?? req.prompt,
           end_seconds: 5,
+          style: {
+            prompt: prompt,
+          },
           assets: {
-            image: imageUrl,
+            image_file_path: imageUrl,
           },
-          output: {
-            width: 1280,
-            height: 720,
-            frame_rate: 24,
-            duration_seconds: 5,
-          },
+          orientation: orientation,
+          resolution: resolution,
         }),
       })
     } else {
-      // Text-to-video
+      // Text-to-Video — formato corretto secondo docs.magichour.ai
       submitRes = await fetch('https://api.magichour.ai/v1/text-to-video', {
         method: 'POST',
         headers: {
@@ -161,30 +177,31 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: `acasting-${Date.now()}`,
-          prompt: req.enhancedPrompt ?? req.prompt,
+          name: `acasting-t2v-${Date.now()}`,
           end_seconds: 5,
-          output: {
-            width: 1280,
-            height: 720,
-            frame_rate: 24,
-            duration_seconds: 5,
+          orientation: orientation,
+          style: {
+            prompt: prompt,
           },
+          resolution: resolution,
         }),
       })
     }
 
     if (!submitRes.ok) {
       const errText = await submitRes.text()
-      throw new Error(`Magic Hour submit error ${submitRes.status}: ${errText}`)
+      console.error('Magic Hour video submit error:', errText)
+      throw new Error(`Magic Hour video error ${submitRes.status}: ${errText}`)
     }
 
     const submitData = await submitRes.json()
     const jobId = submitData.id
 
-    // FIX: Ridotto il polling per rispettare i limiti di timeout Vercel
-    // Hobby: 10s, Pro: 60s — max 8 tentativi × 5s = 40s (sicuro per Pro)
-    // Per job più lunghi, il webhook aggiornerà il DB
+    if (!jobId) {
+      throw new Error('Magic Hour: no job ID returned')
+    }
+
+    // Poll per completamento — max 40s per stare nei limiti Vercel
     const maxAttempts = 8
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 5000))
@@ -193,24 +210,29 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         headers: { Authorization: `Bearer ${apiKey}` },
       })
 
-      if (!statusRes.ok) continue
+      if (!statusRes.ok) {
+        console.warn(`Magic Hour poll ${i + 1}: status ${statusRes.status}`)
+        continue
+      }
+
       const statusData = await statusRes.json()
+      console.log(`Magic Hour poll ${i + 1}: status = ${statusData.status}`)
 
       if (statusData.status === 'complete') {
         const videoUrl = statusData.downloads?.[0]?.url ?? statusData.download_url
         if (videoUrl) return { url: videoUrl, jobId }
       }
-      if (statusData.status === 'error') {
-        throw new Error(`Magic Hour video failed: ${statusData.error_message ?? 'unknown'}`)
+      if (statusData.status === 'error' || statusData.status === 'canceled') {
+        throw new Error(`Magic Hour video failed: ${statusData.error_message ?? statusData.status}`)
       }
     }
 
-    // FIX: Invece di lanciare errore, ritorna il jobId così il webhook può completare
-    console.warn(`Magic Hour video ${jobId}: still processing after polling, deferring to webhook`)
+    // Non completato nel timeout — il webhook aggiornerà il DB
+    console.warn(`Magic Hour video ${jobId}: still processing, deferring to webhook`)
     return { url: '', jobId }
 
   } else {
-    // Image generation
+    // Image generation — formato corretto
     const imgRes = await fetch('https://api.magichour.ai/v1/ai-image-generator', {
       method: 'POST',
       headers: {
@@ -219,41 +241,51 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
       },
       body: JSON.stringify({
         name: `acasting-img-${Date.now()}`,
-        prompt: req.enhancedPrompt ?? req.prompt,
-        output: {
-          width:  1024,
-          height: 1024,
+        image_count: 1,
+        orientation: orientation,
+        style: {
+          prompt: prompt,
         },
+        resolution: resolution,
       }),
     })
 
     if (!imgRes.ok) {
       const errText = await imgRes.text()
+      console.error('Magic Hour image error:', errText)
       throw new Error(`Magic Hour image error ${imgRes.status}: ${errText}`)
     }
 
     const imgData = await imgRes.json()
     const jobId: string = imgData.id
 
-    // Poll for completion (immagini sono più veloci dei video)
+    if (!jobId) {
+      throw new Error('Magic Hour image: no job ID returned')
+    }
+
+    // Poll per completamento
     for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 3000))
+
       const statusRes = await fetch(`https://api.magichour.ai/v1/image-projects/${jobId}`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       })
+
       if (!statusRes.ok) continue
+
       const statusData = await statusRes.json()
+      console.log(`Magic Hour img poll ${i + 1}: status = ${statusData.status}`)
+
       if (statusData.status === 'complete') {
         const url = statusData.downloads?.[0]?.url ?? statusData.download_url
         if (url) return { url, jobId }
       }
-      if (statusData.status === 'error') {
-        throw new Error(`Magic Hour image failed: ${statusData.error_message}`)
+      if (statusData.status === 'error' || statusData.status === 'canceled') {
+        throw new Error(`Magic Hour image failed: ${statusData.error_message ?? statusData.status}`)
       }
     }
 
-    // Anche per le immagini, se non completa in tempo affidati al webhook
-    console.warn(`Magic Hour image ${jobId}: still processing after polling, deferring to webhook`)
+    console.warn(`Magic Hour image ${jobId}: still processing, deferring to webhook`)
     return { url: '', jobId }
   }
 }
@@ -273,13 +305,11 @@ async function trackUsage(provider: string) {
       return
     }
 
-    // Reset daily if needed
     const lastReset = existing.dailyResetAt
     const shouldResetDaily =
       now.getDate() !== lastReset.getDate() ||
       now.getMonth() !== lastReset.getMonth()
 
-    // Reset monthly if needed
     const shouldResetMonthly =
       now.getMonth() !== existing.monthlyResetAt.getMonth()
 
@@ -332,7 +362,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing required field: mediaType' }, { status: 400 })
   }
 
-  // FIX: Wrappa la creazione DB in try-catch con messaggio esplicito
+  // Create DB record con try-catch esplicito
   let generation
   try {
     generation = await prisma.generation.create({
@@ -354,9 +384,9 @@ export async function POST(request: NextRequest) {
       },
     })
   } catch (dbErr) {
-    console.error('Database error creating generation:', dbErr)
+    console.error('Database error:', dbErr)
     return NextResponse.json(
-      { error: 'Database connection error. Check DATABASE_URL and run prisma migrate deploy.' },
+      { error: 'Database connection error. Verifica DATABASE_URL e esegui prisma migrate deploy.' },
       { status: 500 }
     )
   }
@@ -374,7 +404,6 @@ export async function POST(request: NextRequest) {
       resultUrl = result.url
       providerJobId = result.jobId
     } else {
-      // Mark as failed before returning error
       await prisma.generation.update({
         where: { id: generation.id },
         data: { status: 'failed', errorMessage: `Unknown provider: ${provider}` },
@@ -382,10 +411,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 })
     }
 
-    // FIX: Gestisci il caso in cui Magic Hour non ha completato in tempo (url vuoto)
+    // Gestisci il caso in cui Magic Hour non ha completato in tempo
     const isStillProcessing = !resultUrl && providerJobId
 
-    // Update DB
     const updated = await prisma.generation.update({
       where: { id: generation.id },
       data: {
@@ -401,7 +429,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       generation: updated,
-      // Indica al client se deve fare polling per il completamento
       needsPolling: isStillProcessing,
     })
 

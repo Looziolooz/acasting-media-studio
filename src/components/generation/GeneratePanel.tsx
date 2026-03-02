@@ -2,10 +2,10 @@
 import { useState, useCallback, useRef } from 'react'
 import { useAppStore } from '@/store'
 import { enhancePrompt, TASK_LABELS, STYLE_LABELS, LIGHTING_LABELS, COMPOSITION_LABELS } from '@/lib/prompt-engineer'
-import { PROVIDERS, SOCIAL_RATIOS } from '@/lib/ai-providers/config'
+import { PROVIDERS, SOCIAL_RATIOS, MAGICHOUR_CREDIT_COSTS } from '@/lib/ai-providers/config'
 import {
   Wand2, Send, ChevronDown, Image, Film, Sparkles,
-  RotateCcw, Copy, Check, Upload, X
+  RotateCcw, Copy, Check, Upload, X, Info, AlertCircle, Clock
 } from 'lucide-react'
 import type {
   AcastingTask, ImageStyle, LightingPreset,
@@ -50,6 +50,21 @@ const RATIO_OPTIONS: [AspectRatio, string][] = [
   ['3:4',  '3:4'],
 ]
 
+// ---- prompt tips per provider ----
+const PROMPT_TIPS: Record<string, string> = {
+  pollinations: 'Pollinations: sii descrittivo. Includi stile, colori, soggetto. Es: "professional headshot, woman smiling, studio lighting, clean background"',
+  huggingface: 'HuggingFace: funziona bene con prompt dettagliati in inglese. Il primo avvio può richiedere 30-60 secondi.',
+  magichour: 'Magic Hour: per i video includi azione, ambiente e stile di camera. Es: "A confident actor walking toward camera, cinematic slow motion, warm golden lighting"',
+}
+
+// ---- stima tempo ----
+const TIME_ESTIMATES: Record<string, string> = {
+  pollinations: '~10-30s',
+  huggingface: '~15-60s (più lento al primo uso)',
+  magichour_image: '~15-30s',
+  magichour_video: '~60-120s',
+}
+
 export function GeneratePanel() {
   const { currentRequest, setCurrentRequest, addToQueue, usageStats } = useAppStore()
 
@@ -60,6 +75,7 @@ export function GeneratePanel() {
   const [copied, setCopied]         = useState(false)
   const [imageUrls, setImageUrls]   = useState<string[]>([])
   const [errorMsg, setErrorMsg]     = useState<string | null>(null)
+  const [showTips, setShowTips]     = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const task        = (currentRequest.task        ?? 'casting-post') as AcastingTask
@@ -75,14 +91,26 @@ export function GeneratePanel() {
   const isExhausted = usageForProvider?.level === 'exhausted'
   
   const canUploadImages = mediaType === 'video' && provider === 'magichour'
-  const needsImages = canUploadImages
+
+  // Stima crediti per Magic Hour
+  const estimatedCredits = provider === 'magichour'
+    ? mediaType === 'video'
+      ? MAGICHOUR_CREDIT_COSTS['text-to-video-5s']
+      : MAGICHOUR_CREDIT_COSTS['ai-image']
+    : null
+
+  // Stima tempo
+  const estimatedTime = provider === 'magichour'
+    ? mediaType === 'video'
+      ? TIME_ESTIMATES.magichour_video
+      : TIME_ESTIMATES.magichour_image
+    : TIME_ESTIMATES[provider] ?? '~20s'
 
   const handleEnhance = useCallback(() => {
     if (!rawPrompt.trim()) return
     const result = enhancePrompt({ prompt: rawPrompt, task, style, lighting, composition, mediaType: mediaType as 'image' | 'video' })
     setEnhanced(result.enhancedPrompt)
     setShow(true)
-    // Auto-suggest provider
     setCurrentRequest({ provider: result.suggestedProvider, model: result.suggestedModel })
   }, [rawPrompt, task, style, lighting, composition, mediaType, setCurrentRequest])
 
@@ -95,7 +123,6 @@ export function GeneratePanel() {
     const jobId = uuidv4()
 
     // FIX: Costruisci la request esplicitamente con TUTTI i campi required
-    // invece di fare spread di currentRequest (che è Partial)
     const requestBody: GenerationRequest = {
       prompt: rawPrompt,
       enhancedPrompt: finalPrompt !== rawPrompt ? finalPrompt : undefined,
@@ -140,11 +167,11 @@ export function GeneratePanel() {
         })
 
         // Se il job è ancora in processing (Magic Hour video), inizia polling
-        if (data.needsPolling && data.generation.providerJobId) {
+        if (data.needsPolling && data.generation.id) {
           pollForCompletion(jobId, data.generation.id)
         }
       } else {
-        const errMessage = data.error ?? 'Unknown error'
+        const errMessage = data.error ?? 'Errore sconosciuto'
         useAppStore.getState().updateJob(jobId, {
           status: 'failed',
           errorMessage: errMessage,
@@ -152,7 +179,7 @@ export function GeneratePanel() {
         setErrorMsg(errMessage)
       }
     } catch (err) {
-      const errMessage = err instanceof Error ? err.message : 'Network error'
+      const errMessage = err instanceof Error ? err.message : 'Errore di rete'
       useAppStore.getState().updateJob(jobId, {
         status: 'failed',
         errorMessage: errMessage,
@@ -165,11 +192,11 @@ export function GeneratePanel() {
 
   // Polling per Magic Hour video che non completano in tempo
   const pollForCompletion = async (jobId: string, generationId: string) => {
-    const maxPolls = 30 // 30 * 5s = 2.5 minuti
+    const maxPolls = 24 // 24 × 5s = 2 minuti
     for (let i = 0; i < maxPolls; i++) {
       await new Promise((r) => setTimeout(r, 5000))
       try {
-        const res = await fetch(`/api/history?status=completed&limit=1`)
+        const res = await fetch(`/api/history?limit=1&status=completed`)
         const data = await res.json()
         const found = data.items?.find((item: any) => item.id === generationId)
         if (found && found.resultUrl) {
@@ -184,6 +211,11 @@ export function GeneratePanel() {
         // Continua polling
       }
     }
+    // Timeout — segnala all'utente
+    useAppStore.getState().updateJob(jobId, {
+      status: 'failed',
+      errorMessage: 'Il video sta impiegando più del previsto. Controlla la Gallery tra qualche minuto.',
+    })
   }
 
   const copyEnhanced = () => {
@@ -219,16 +251,17 @@ export function GeneratePanel() {
       {/* Error banner */}
       {errorMsg && (
         <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-          <X
-            size={14}
-            className="text-red-400 mt-0.5 cursor-pointer shrink-0"
-            onClick={() => setErrorMsg(null)}
-          />
-          <p className="text-xs text-red-300/80 leading-relaxed">{errorMsg}</p>
+          <AlertCircle size={14} className="text-red-400 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-red-300/80 leading-relaxed break-words">{errorMsg}</p>
+          </div>
+          <button onClick={() => setErrorMsg(null)} className="shrink-0">
+            <X size={12} className="text-red-400/60 hover:text-red-400" />
+          </button>
         </div>
       )}
 
-      {/* Media type toggle - improved */}
+      {/* Media type toggle */}
       <div className="flex gap-2">
         {(['image', 'video'] as const).map((t) => (
           <button
@@ -242,18 +275,46 @@ export function GeneratePanel() {
           >
             {t === 'image' ? <Image size={16} /> : <Film size={16} />}
             {t === 'image' ? 'Image' : 'Video'}
+            {t === 'video' && (
+              <span className="text-[9px] opacity-60 ml-1">(Magic Hour)</span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Prompt input */}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label htmlFor="prompt" className="text-xs text-white/40 uppercase tracking-wider">
+            Prompt
+          </label>
+          <button
+            onClick={() => setShowTips(!showTips)}
+            className="flex items-center gap-1 text-[10px] text-white/30 hover:text-white/60 transition-colors"
+          >
+            <Info size={10} />
+            Tips
+          </button>
+        </div>
+
+        {showTips && (
+          <div className="p-2.5 rounded-lg bg-cyan-500/8 border border-cyan-500/15">
+            <p className="text-[10px] text-cyan-300/70 leading-relaxed">
+              {PROMPT_TIPS[provider] ?? 'Sii il più descrittivo possibile. Includi soggetto, azione, ambiente, stile.'}
+            </p>
+          </div>
+        )}
+
         <textarea
           id="prompt"
           name="prompt"
           value={rawPrompt}
           onChange={(e) => setRawPrompt(e.target.value)}
-          placeholder="Describe what you want to create..."
+          placeholder={
+            mediaType === 'video'
+              ? 'Es: A confident young actor walking toward camera on a Stockholm street, cinematic slow motion, warm golden hour lighting...'
+              : 'Es: Professional headshot of a smiling woman, clean studio background, soft lighting, casting agency quality...'
+          }
           rows={3}
           className="w-full glass rounded-xl px-4 py-3 text-sm text-white/80 placeholder-white/20
             focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/30
@@ -265,7 +326,7 @@ export function GeneratePanel() {
       {canUploadImages && (
         <div className="space-y-1.5">
           <label htmlFor="imageUpload" className="text-xs text-white/40 uppercase tracking-wider">
-            Upload Images (optional - for image-to-video)
+            Upload Image (opzionale - per image-to-video)
           </label>
           <input
             type="file"
@@ -302,7 +363,7 @@ export function GeneratePanel() {
             )}
           </div>
           <p className="text-[10px] text-white/30">
-            Upload up to 5 images to animate. Leave empty for text-to-video.
+            Carica un&apos;immagine per animarla. Lascia vuoto per text-to-video.
           </p>
         </div>
       )}
@@ -354,7 +415,7 @@ export function GeneratePanel() {
         </div>
       </div>
 
-      {/* Provider selector - improved grid */}
+      {/* Provider selector */}
       <div className="space-y-2">
         <div className="grid grid-cols-3 gap-2">
           {Object.values(PROVIDERS)
@@ -382,28 +443,38 @@ export function GeneratePanel() {
                     </span>
                   </div>
                   <p className="text-[9px] text-white/40 leading-tight">
-                    {p.dailyLimit
-                      ? `${usage?.dailyUsed ?? 0}/${p.dailyLimit} today`
-                      : p.monthlyLimit
-                      ? `${usage?.monthlyUsed ?? 0}/${p.monthlyLimit} month`
-                      : 'Unlimited'}
+                    {p.id === 'pollinations'
+                      ? 'Illimitato'
+                      : p.id === 'huggingface'
+                      ? 'Crediti HF gratuiti'
+                      : `~${estimatedCredits ?? '?'} crediti`}
                   </p>
-                  {(p.dailyLimit || p.monthlyLimit) && (
-                    <div className="mt-2 h-1 bg-white/10 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${Math.min(100, usage?.percentageDaily ?? usage?.percentageMonthly ?? 0)}%`,
-                          background: p.color,
-                        }}
-                      />
-                    </div>
-                  )}
                 </button>
               )
             })}
         </div>
       </div>
+
+      {/* Pre-generation info bar */}
+      {rawPrompt.trim() && (
+        <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/3 border border-white/5">
+          <div className="flex items-center gap-3 text-[10px] text-white/40">
+            <span className="flex items-center gap-1">
+              <Clock size={10} />
+              {estimatedTime}
+            </span>
+            {estimatedCredits !== null && (
+              <span className="flex items-center gap-1">
+                <Sparkles size={10} />
+                ~{estimatedCredits} crediti
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-white/25">
+            {selectedProvider?.name}
+          </span>
+        </div>
+      )}
 
       {/* Action buttons */}
       <div className="flex gap-2 pt-2">
@@ -429,7 +500,7 @@ export function GeneratePanel() {
           {generating ? (
             <>
               <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <span>Creating...</span>
+              <span>Generating...</span>
             </>
           ) : (
             <>

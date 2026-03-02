@@ -5,7 +5,7 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'pollinations',
     name: 'Pollinations.ai',
     color: '#22d3ee',  // cyan
-    description: 'Open source, unlimited, no API key. Images only.',
+    description: 'Open source, illimitato, nessuna API key. Solo immagini. Veloce ma qualità variabile.',
     mediaTypes: ['image'],
     monthlyLimit: null,
     dailyLimit: null,
@@ -44,7 +44,7 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'huggingface',
     name: 'Hugging Face',
     color: '#fbbf24',  // amber
-    description: 'Free initial credits. Warning: they run out.',
+    description: 'Crediti gratuiti iniziali. Alta qualità con FLUX.1 Dev. Primo avvio lento (~30s).',
     mediaTypes: ['image'],
     monthlyLimit: null,
     dailyLimit: null,
@@ -69,7 +69,7 @@ export const PROVIDERS: Record<string, Provider> = {
       },
       {
         id: 'runwayml/stable-diffusion-v1-5',
-        name: 'SD v1.5 (economical)',
+        name: 'SD v1.5 (economico)',
         mediaType: 'image',
         defaultWidth: 512,
         defaultHeight: 512,
@@ -81,10 +81,14 @@ export const PROVIDERS: Record<string, Provider> = {
     id: 'magichour',
     name: 'Magic Hour',
     color: '#a78bfa',  // violet
-    description: '400 signup credits + 100 credits/day. Video + Images.',
+    // FIX: Descrizione corretta del sistema crediti
+    description: '400 crediti signup + 100/giorno. Video 5s = ~150 crediti. Immagine = ~5 crediti.',
     mediaTypes: ['image', 'video'],
+    // FIX: Magic Hour usa crediti, non un semplice conteggio giornaliero
+    // 400 iniziali + 100/giorno reclamabili. Un video 5s costa ~150 crediti.
+    // Mettiamo null perché il tracking reale è su magichour.ai
     monthlyLimit: null,
-    dailyLimit: 100,
+    dailyLimit: null,
     resetCycle: 'daily',
     isFree: true,
     requiresApiKey: true,
@@ -135,4 +139,12 @@ export const SOCIAL_RATIOS: Record<string, { ratio: string; label: string }> = {
   facebook_cover:    { ratio: '16:9', label: 'Facebook Cover' },
   linkedin:          { ratio: '4:3',  label: 'LinkedIn' },
   headshot:          { ratio: '3:4',  label: 'Headshot / Portrait' },
+}
+
+// Credit cost estimates per Magic Hour (piano gratuito 480p)
+export const MAGICHOUR_CREDIT_COSTS = {
+  'text-to-video-5s':  150,  // 30fps × 5s
+  'text-to-video-10s': 300,  // 30fps × 10s
+  'image-to-video-5s': 150,
+  'ai-image':          5,
 }
