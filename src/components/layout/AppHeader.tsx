@@ -3,10 +3,10 @@ import { useAppStore } from '@/store'
 import { AlertTriangle, Zap, Clock, BarChart2, History, Layers } from 'lucide-react'
 
 const TABS = [
-  { id: 'generate' as const, label: 'Generate', icon: Zap },
-  { id: 'queue'    as const, label: 'Queue',   icon: Clock },
-  { id: 'history'  as const, label: 'History', icon: History },
-  { id: 'usage'    as const, label: 'Usage',   icon: BarChart2 },
+  { id: 'generate' as const, label: 'Create', icon: Zap },
+  { id: 'queue' as const, label: 'Queue', icon: Clock },
+  { id: 'history' as const, label: 'Gallery', icon: History },
+  { id: 'usage' as const, label: 'Usage', icon: BarChart2 },
 ]
 
 export function AppHeader() {
@@ -18,65 +18,78 @@ export function AppHeader() {
   )
 
   return (
-    <header className="sticky top-0 z-40 border-b border-white/7 glass">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex items-center justify-between h-14">
+    <header className="sticky top-0 z-40 glass border-b border-white/5">
+      <div className="max-w-7xl mx-auto px-4 lg:px-6">
+        <div className="flex items-center justify-between h-14 lg:h-16">
           {/* Brand */}
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center">
-              <Layers size={14} className="text-white" />
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 via-fuchsia-500 to-cyan-500 
+              flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <Layers size={16} className="text-white" />
             </div>
-            <div>
+            <div className="lg:block hidden">
               <span className="text-sm font-semibold text-white">Acasting</span>
-              <span className="text-sm text-white/40 ml-1">Media Studio</span>
+              <span className="text-sm text-white/40 ml-1.5">Media Studio</span>
+            </div>
+            <div className="lg:hidden">
+              <span className="text-sm font-semibold text-white">Media Studio</span>
             </div>
           </div>
 
-          {/* Tabs */}
-          <nav className="flex items-center gap-1">
+          {/* Desktop Tabs */}
+          <nav className="hidden lg:flex items-center gap-1">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}
-                className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                   activeTab === id
-                    ? 'text-white bg-white/8'
-                    : 'text-white/40 hover:text-white/70 hover:bg-white/4'
+                    ? 'text-white bg-white/10'
+                    : 'text-white/50 hover:text-white/80 hover:bg-white/5'
                 }`}
               >
-                <Icon size={13} />
+                <Icon size={15} />
                 {label}
                 {id === 'queue' && processingCount > 0 && (
-                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/80 text-white leading-none">
+                  <span className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold 
+                    bg-violet-500/80 text-white">
                     {processingCount}
                   </span>
                 )}
                 {id === 'usage' && criticalProviders.length > 0 && (
-                  <AlertTriangle size={10} className="text-amber-400 ml-0.5" />
+                  <AlertTriangle size={12} className="text-amber-400" />
                 )}
               </button>
             ))}
           </nav>
 
-          {/* Status dot */}
-          <div className="flex items-center gap-2 text-xs text-white/30">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 pulse-dot" />
-            online
+          {/* Status */}
+          <div className="flex items-center gap-3">
+            {processingCount > 0 && (
+              <div className="lg:hidden flex items-center gap-1.5 px-2 py-1 rounded-full 
+                bg-violet-500/20 border border-violet-500/30">
+                <span className="w-2 h-2 rounded-full bg-violet-400 animate-pulse" />
+                <span className="text-[10px] text-violet-300 font-medium">{processingCount}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-2 text-xs text-white/40">
+              <span className="w-2 h-2 rounded-full bg-green-400 ring-2 ring-green-400/30" />
+              <span className="hidden sm:inline">Ready</span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Critical usage banner */}
       {criticalProviders.length > 0 && (
-        <div className="border-t border-amber-500/20 bg-amber-500/6 px-4 py-2">
-          <div className="max-w-6xl mx-auto flex items-center gap-2 text-xs text-amber-300/80">
-            <AlertTriangle size={12} />
-            <span>
+        <div className="border-t border-amber-500/20 bg-amber-500/6">
+          <div className="max-w-7xl mx-auto px-4 lg:px-6 py-2 flex items-center gap-2">
+            <AlertTriangle size={12} className="text-amber-400 flex-shrink-0" />
+            <span className="text-xs text-amber-300/80 truncate">
               {criticalProviders.map((p) => p.providerId).join(', ')} —{' '}
               {criticalProviders.some((p) => p.level === 'exhausted')
                 ? 'credits exhausted'
                 : 'credits running low'}
-              . Check the Usage dashboard.
             </span>
           </div>
         </div>

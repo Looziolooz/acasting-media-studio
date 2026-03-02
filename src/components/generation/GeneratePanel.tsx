@@ -15,32 +15,28 @@ import { v4 as uuidv4 } from 'uuid'
 
 // ---- small helpers ----
 function Select<T extends string>({
-  label, value, onChange, options,
+  value, onChange, options,
 }: {
-  label: string
   value: T
   onChange: (v: T) => void
   options: [T, string][]
 }) {
   return (
-    <div className="space-y-1.5">
-      <label className="text-xs text-white/40 uppercase tracking-wider">{label}</label>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value as T)}
-          className="w-full appearance-none glass rounded-lg px-3 py-2 text-sm text-white/80
-            focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20
-            bg-transparent cursor-pointer pr-8"
-        >
-          {options.map(([v, lbl]) => (
-            <option key={v} value={v} className="bg-[#111120] text-white">
-              {lbl}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
-      </div>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        className="w-full appearance-none glass rounded-lg px-3 py-2.5 text-sm text-white/80
+          focus:outline-none focus:ring-2 focus:ring-violet-500/30
+          bg-transparent cursor-pointer pr-8"
+      >
+        {options.map(([v, lbl]) => (
+          <option key={v} value={v} className="bg-[#111120] text-white">
+            {lbl}
+          </option>
+        ))}
+      </select>
+      <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none" />
     </div>
   )
 }
@@ -179,34 +175,33 @@ export function GeneratePanel() {
 
   return (
     <div className="space-y-4">
-      {/* Media type toggle */}
+      {/* Media type toggle - improved */}
       <div className="flex gap-2">
         {(['image', 'video'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setCurrentRequest({ mediaType: t })}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
               mediaType === t
-                ? 'bg-violet-600/20 border border-violet-500/40 text-violet-300'
-                : 'glass text-white/40 hover:text-white/70'
+                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-500/25'
+                : 'glass text-white/50 hover:text-white hover:bg-white/5'
             }`}
           >
-            {t === 'image' ? <Image size={14} /> : <Film size={14} />}
+            {t === 'image' ? <Image size={16} /> : <Film size={16} />}
             {t === 'image' ? 'Image' : 'Video'}
           </button>
         ))}
       </div>
 
       {/* Prompt input */}
-      <div className="space-y-1.5">
-        <label className="text-xs text-white/40 uppercase tracking-wider">Prompt</label>
+      <div className="space-y-2">
         <textarea
           value={rawPrompt}
           onChange={(e) => setRawPrompt(e.target.value)}
-          placeholder="Describe the content to generate for Acasting..."
+          placeholder="Describe what you want to create..."
           rows={3}
           className="w-full glass rounded-xl px-4 py-3 text-sm text-white/80 placeholder-white/20
-            focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20
+            focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500/30
             resize-none"
         />
       </div>
@@ -256,15 +251,13 @@ export function GeneratePanel() {
       )}
 
       {/* Task & style row */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2">
         <Select
-          label="Task"
           value={task}
           onChange={(v) => setCurrentRequest({ task: v })}
           options={Object.entries(TASK_LABELS) as [AcastingTask, string][]}
         />
         <Select
-          label="Style"
           value={style}
           onChange={(v) => setCurrentRequest({ style: v })}
           options={Object.entries(STYLE_LABELS) as [ImageStyle, string][]}
@@ -272,15 +265,13 @@ export function GeneratePanel() {
       </div>
 
       {/* Lighting & composition row */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2">
         <Select
-          label="Lighting"
           value={lighting}
           onChange={(v) => setCurrentRequest({ lighting: v })}
           options={Object.entries(LIGHTING_LABELS) as [LightingPreset, string][]}
         />
         <Select
-          label="Composition"
           value={composition}
           onChange={(v) => setCurrentRequest({ composition: v })}
           options={Object.entries(COMPOSITION_LABELS) as [CompositionPreset, string][]}
@@ -288,31 +279,17 @@ export function GeneratePanel() {
       </div>
 
       {/* Aspect ratio pills */}
-      <div className="space-y-1.5">
-        <label className="text-xs text-white/40 uppercase tracking-wider">Format</label>
+      <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
           {RATIO_OPTIONS.map(([ratio, label]) => (
             <button
               key={ratio}
               onClick={() => setCurrentRequest({ aspectRatio: ratio })}
-              className={`px-3 py-1 rounded-lg text-xs font-mono font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                 aspectRatio === ratio
                   ? 'bg-cyan-500/20 border border-cyan-500/40 text-cyan-300'
-                  : 'glass text-white/40 hover:text-white/70'
+                  : 'glass text-white/50 hover:text-white hover:bg-white/5'
               }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {/* Social presets */}
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {Object.entries(SOCIAL_RATIOS).map(([key, { ratio, label }]) => (
-            <button
-              key={key}
-              onClick={() => setCurrentRequest({ aspectRatio: ratio as AspectRatio })}
-              className="px-2 py-0.5 rounded text-[10px] text-white/30 hover:text-white/60
-                border border-white/6 hover:border-white/15 transition-all"
             >
               {label}
             </button>
@@ -320,9 +297,8 @@ export function GeneratePanel() {
         </div>
       </div>
 
-      {/* Provider selector */}
-      <div className="space-y-1.5">
-        <label className="text-xs text-white/40 uppercase tracking-wider">Provider</label>
+      {/* Provider selector - improved grid */}
+      <div className="space-y-2">
         <div className="grid grid-cols-3 gap-2">
           {Object.values(PROVIDERS)
             .filter((p) => p.mediaTypes.includes(mediaType as any))
@@ -335,36 +311,30 @@ export function GeneratePanel() {
                   key={p.id}
                   onClick={() => !exhausted && setCurrentRequest({ provider: p.id })}
                   disabled={exhausted}
-                  className={`glass rounded-xl p-3 text-left transition-all border ${
+                  className={`relative p-3 rounded-xl text-left transition-all border ${
                     isSelected
-                      ? 'border-violet-500/40 bg-violet-500/8'
+                      ? 'border-violet-500/50 bg-violet-500/10 shadow-lg shadow-violet-500/10'
                       : exhausted
-                      ? 'opacity-40 cursor-not-allowed'
-                      : 'border-white/7 hover:border-white/15'
+                      ? 'opacity-40 cursor-not-allowed border-white/5'
+                      : 'border-white/5 hover:border-white/15 hover:bg-white/5'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold" style={{ color: p.color }}>
                       {p.name}
                     </span>
-                    {exhausted && (
-                      <span className="text-[9px] text-red-400 border border-red-500/30 rounded px-1">
-                        exhausted
-                      </span>
-                    )}
                   </div>
-                  <p className="text-[10px] text-white/30 leading-snug line-clamp-2">
+                  <p className="text-[9px] text-white/40 leading-tight">
                     {p.dailyLimit
                       ? `${usage?.dailyUsed ?? 0}/${p.dailyLimit} today`
                       : p.monthlyLimit
                       ? `${usage?.monthlyUsed ?? 0}/${p.monthlyLimit} month`
-                      : 'Unlimited ✓'}
+                      : 'Unlimited'}
                   </p>
-                  {/* mini usage bar */}
                   {(p.dailyLimit || p.monthlyLimit) && (
-                    <div className="mt-2 h-0.5 bg-white/6 rounded-full overflow-hidden">
+                    <div className="mt-2 h-1 bg-white/10 rounded-full overflow-hidden">
                       <div
-                        className="h-full rounded-full transition-all"
+                        className="h-full rounded-full"
                         style={{
                           width: `${Math.min(100, usage?.percentageDaily ?? usage?.percentageMonthly ?? 0)}%`,
                           background: p.color,
@@ -378,36 +348,36 @@ export function GeneratePanel() {
         </div>
       </div>
 
-      {/* Enhance + Generate buttons */}
-      <div className="flex gap-2 pt-1">
+      {/* Action buttons */}
+      <div className="flex gap-2 pt-2">
         <button
           onClick={handleEnhance}
           disabled={!rawPrompt.trim()}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium
+          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium
             glass border border-white/10 text-white/60 hover:text-white hover:border-white/20
             transition-all disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          <Wand2 size={15} />
-          Enhance Prompt
+          <Wand2 size={16} />
+          <span className="hidden sm:inline">Enhance</span>
         </button>
 
         <button
           onClick={handleGenerate}
           disabled={(!rawPrompt.trim() && imageUrls.length === 0) || generating || isExhausted}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
-            text-sm font-semibold bg-violet-600 hover:bg-violet-500 text-white
+          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl
+            text-sm font-semibold bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white
             transition-all disabled:opacity-40 disabled:cursor-not-allowed
-            shadow-lg shadow-violet-900/40"
+            shadow-lg shadow-violet-900/30 active:scale-[0.98]"
         >
           {generating ? (
             <>
               <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Generating...
+              <span>Creating...</span>
             </>
           ) : (
             <>
-              <Send size={14} />
-              Generate
+              <Send size={16} />
+              <span>Generate</span>
             </>
           )}
         </button>
@@ -415,28 +385,28 @@ export function GeneratePanel() {
 
       {/* Enhanced prompt preview */}
       {showEnhanced && enhanced && (
-        <div className="glass rounded-xl p-3 space-y-2 fade-in-up border-violet-500/20 border">
+        <div className="glass rounded-xl p-3 space-y-2 border border-violet-500/20">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-xs text-violet-400">
-              <Sparkles size={11} />
-              Enhanced Prompt
+            <div className="flex items-center gap-2 text-xs text-violet-400">
+              <Sparkles size={12} />
+              <span className="font-medium">Enhanced</span>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={copyEnhanced}
-                className="text-white/30 hover:text-white/70 transition-colors"
+                className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
               >
                 {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
               </button>
               <button
                 onClick={() => setShow(false)}
-                className="text-white/30 hover:text-white/70 transition-colors"
+                className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
               >
-                <RotateCcw size={12} />
+                <X size={13} />
               </button>
             </div>
           </div>
-          <p className="text-xs text-white/50 leading-relaxed line-clamp-4">{enhanced}</p>
+          <p className="text-xs text-white/60 leading-relaxed line-clamp-4">{enhanced}</p>
         </div>
       )}
     </div>
