@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 // ============================================================
-// POLLINATIONS - fully free, no API key
+// POLLINATIONS
 // ============================================================
 async function generatePollinations(req: GenerationRequest): Promise<string> {
   const dims = ASPECT_RATIO_DIMENSIONS[req.aspectRatio]?.md ?? { width: 1024, height: 1024 }
@@ -16,7 +16,8 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
   const seed   = req.seed   ?? Math.floor(Math.random() * 999999)
   const model  = req.model  ?? 'flux'
 
-  const encoded = encodeURIComponent(req.enhancedPrompt ?? req.prompt)
+  const promptText = req.enhancedPrompt ?? req.prompt
+  const encoded = encodeURIComponent(promptText)
   const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=${model}&seed=${seed}&nologo=true`
 
   try {
@@ -24,9 +25,7 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
     const timeout = setTimeout(() => controller.abort(), 45000)
     const res = await fetch(url, { signal: controller.signal })
     clearTimeout(timeout)
-    if (!res.ok) {
-      throw new Error(`Pollinations error: ${res.status} ${res.statusText}`)
-    }
+    if (!res.ok) throw new Error(`Pollinations error: ${res.status} ${res.statusText}`)
     return url
   } catch (err: unknown) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -38,7 +37,7 @@ async function generatePollinations(req: GenerationRequest): Promise<string> {
 }
 
 // ============================================================
-// HUGGING FACE - free tier (API key required)
+// HUGGING FACE
 // ============================================================
 async function generateHuggingFace(req: GenerationRequest): Promise<string> {
   const apiKey = process.env.HUGGINGFACE_API_KEY
@@ -46,7 +45,6 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
 
   const dims = ASPECT_RATIO_DIMENSIONS[req.aspectRatio]?.md ?? { width: 1024, height: 1024 }
   const model = req.model ?? 'black-forest-labs/FLUX.1-dev'
-
   const maxRetries = 2
   let lastError = ''
 
@@ -73,7 +71,6 @@ async function generateHuggingFace(req: GenerationRequest): Promise<string> {
       const data = await response.json().catch(() => ({}))
       const waitTime = data.estimated_time ? Math.min(data.estimated_time * 1000, 20000) : 10000
       lastError = `Model loading (attempt ${attempt + 1}/${maxRetries + 1})`
-      console.log(`HuggingFace: model loading, waiting ${waitTime}ms...`)
       if (attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, waitTime))
         continue
@@ -118,7 +115,6 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
     let submitRes: Response
 
     if (hasImages) {
-      const imageUrl = req.imageUrls![0]
       submitRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
         method: 'POST',
         headers: {
@@ -129,7 +125,7 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
           name: `acasting-img2vid-${Date.now()}`,
           end_seconds: 5,
           style: { prompt },
-          assets: { image_file_path: imageUrl },
+          assets: { image_file_path: req.imageUrls![0] },
           orientation,
           resolution: '480p',
         }),
@@ -169,7 +165,6 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
       })
       if (!statusRes.ok) continue
       const statusData = await statusRes.json()
-      console.log(`Magic Hour poll ${i + 1}: status = ${statusData.status}`)
       if (statusData.status === 'complete') {
         const videoUrl = statusData.downloads?.[0]?.url ?? statusData.download_url
         if (videoUrl) return { url: videoUrl, jobId }
@@ -178,8 +173,6 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         throw new Error(`Magic Hour video failed: ${statusData.error_message ?? statusData.status}`)
       }
     }
-
-    console.warn(`Magic Hour video ${jobId}: still processing, deferring to webhook`)
     return { url: '', jobId }
 
   } else {
@@ -223,8 +216,6 @@ async function generateMagicHour(req: GenerationRequest): Promise<{ url: string;
         throw new Error(`Magic Hour image failed: ${statusData.error_message ?? statusData.status}`)
       }
     }
-
-    console.warn(`Magic Hour image ${jobId}: still processing, deferring to webhook`)
     return { url: '', jobId }
   }
 }
@@ -273,59 +264,67 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // DEBUG: Log the entire body to find the issue
-  console.log('=== /api/generate REQUEST BODY ===')
-  console.log(JSON.stringify(body, null, 2))
-  console.log('=================================')
-
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'Request body must be an object' }, { status: 400 })
   }
 
   const b = body as Record<string, unknown>
 
-  // FIX: More robust prompt extraction — check multiple possible locations
-  let prompt: string | undefined
+  // ============================================================
+  // FIX: Extract prompt with MAXIMUM flexibility
+  // Accept prompt OR enhancedPrompt — whichever has content.
+  // The old code rejected the request if prompt was empty string "",
+  // even when enhancedPrompt had the actual content.
+  // ============================================================
+  const rawPrompt      = typeof b.prompt === 'string' ? b.prompt.trim() : ''
+  const enhancedPrompt = typeof b.enhancedPrompt === 'string' ? b.enhancedPrompt.trim() : ''
 
-  if (typeof b.prompt === 'string' && b.prompt.trim().length > 0) {
-    prompt = b.prompt.trim()
-  } else if (typeof b.enhancedPrompt === 'string' && b.enhancedPrompt.trim().length > 0) {
-    // Fallback: use enhancedPrompt if prompt is empty
-    prompt = b.enhancedPrompt.trim()
-  }
+  // Use whichever has content — prefer prompt, fallback to enhancedPrompt
+  const effectivePrompt = rawPrompt || enhancedPrompt
 
-  if (!prompt) {
-    console.error('Missing prompt. Body keys:', Object.keys(b))
-    console.error('prompt value:', JSON.stringify(b.prompt))
-    console.error('enhancedPrompt value:', JSON.stringify(b.enhancedPrompt))
+  // DEBUG logging
+  console.log('=== /api/generate ===')
+  console.log('prompt length:', rawPrompt.length, 'value:', JSON.stringify(rawPrompt.slice(0, 100)))
+  console.log('enhancedPrompt length:', enhancedPrompt.length)
+  console.log('effectivePrompt length:', effectivePrompt.length)
+  console.log('provider:', b.provider, 'mediaType:', b.mediaType)
+  console.log('====================')
+
+  if (!effectivePrompt) {
     return NextResponse.json(
-      { error: `Missing required field: prompt. Received keys: ${Object.keys(b).join(', ')}` },
+      {
+        error: 'Missing required field: prompt. Both prompt and enhancedPrompt are empty.',
+        debug: {
+          promptType: typeof b.prompt,
+          promptValue: JSON.stringify(b.prompt)?.slice(0, 200),
+          enhancedPromptType: typeof b.enhancedPrompt,
+          keys: Object.keys(b),
+        },
+      },
       { status: 400 }
     )
   }
 
-  // Extract and validate other fields with safe defaults
-  const provider  = (typeof b.provider  === 'string' && b.provider)  ? b.provider  : 'pollinations'
-  const mediaType = (typeof b.mediaType === 'string' && b.mediaType) ? b.mediaType : 'image'
+  // Build the request with safe defaults for everything
+  const provider  = typeof b.provider  === 'string' && b.provider  ? b.provider  : 'pollinations'
+  const mediaType = typeof b.mediaType === 'string' && b.mediaType ? b.mediaType : 'image'
 
   const req: GenerationRequest = {
-    prompt,
-    enhancedPrompt: typeof b.enhancedPrompt === 'string' ? b.enhancedPrompt : undefined,
-    provider: provider as GenerationRequest['provider'],
-    model: (typeof b.model === 'string' ? b.model : undefined) ?? 'flux',
-    mediaType: mediaType as GenerationRequest['mediaType'],
-    task: (typeof b.task === 'string' ? b.task : 'casting-post') as GenerationRequest['task'],
-    style: (typeof b.style === 'string' ? b.style : 'photorealistic') as GenerationRequest['style'],
-    lighting: (typeof b.lighting === 'string' ? b.lighting : 'studio-light') as GenerationRequest['lighting'],
-    composition: (typeof b.composition === 'string' ? b.composition : 'rule-of-thirds') as GenerationRequest['composition'],
-    aspectRatio: (typeof b.aspectRatio === 'string' ? b.aspectRatio : '1:1') as GenerationRequest['aspectRatio'],
-    width: typeof b.width === 'number' ? b.width : undefined,
-    height: typeof b.height === 'number' ? b.height : undefined,
-    seed: typeof b.seed === 'number' ? b.seed : undefined,
-    imageUrls: Array.isArray(b.imageUrls) ? b.imageUrls as string[] : undefined,
+    prompt:         effectivePrompt,
+    enhancedPrompt: enhancedPrompt || undefined,
+    provider:       provider as GenerationRequest['provider'],
+    model:          typeof b.model === 'string' ? b.model : 'flux',
+    mediaType:      mediaType as GenerationRequest['mediaType'],
+    task:           (typeof b.task === 'string' ? b.task : 'casting-post') as GenerationRequest['task'],
+    style:          (typeof b.style === 'string' ? b.style : 'photorealistic') as GenerationRequest['style'],
+    lighting:       (typeof b.lighting === 'string' ? b.lighting : 'studio-light') as GenerationRequest['lighting'],
+    composition:    (typeof b.composition === 'string' ? b.composition : 'rule-of-thirds') as GenerationRequest['composition'],
+    aspectRatio:    (typeof b.aspectRatio === 'string' ? b.aspectRatio : '1:1') as GenerationRequest['aspectRatio'],
+    width:          typeof b.width === 'number' ? b.width : undefined,
+    height:         typeof b.height === 'number' ? b.height : undefined,
+    seed:           typeof b.seed === 'number' ? b.seed : undefined,
+    imageUrls:      Array.isArray(b.imageUrls) ? b.imageUrls as string[] : undefined,
   }
-
-  console.log('Parsed request:', { prompt: req.prompt.slice(0, 50), provider: req.provider, mediaType: req.mediaType })
 
   // Create DB record
   let generation
