@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { ASPECT_RATIO_DIMENSIONS } from '@/lib/ai-providers/config'
 import type { GenerationRequest } from '@/types'
 
+export const dynamic = 'force-dynamic'
+
 // ============================================================
 // POLLINATIONS - fully free, no API key
 // ============================================================
@@ -308,6 +310,11 @@ export async function POST(request: NextRequest) {
       resultUrl = result.url
       providerJobId = result.jobId
     } else {
+      // Mark as failed before returning error
+      await prisma.generation.update({
+        where: { id: generation.id },
+        data: { status: 'failed', errorMessage: `Unknown provider: ${provider}` },
+      }).catch(() => {})
       return NextResponse.json({ error: `Unknown provider: ${provider}` }, { status: 400 })
     }
 

@@ -1,9 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { createHmac } from 'crypto'
+
+function verifySignature(request: NextRequest, body: string): boolean {
+  const signature = request.headers.get('x-magichour-signature')
+  const secret = process.env.MAGICHOUR_WEBHOOK_SECRET
+  
+  if (!secret || !signature) return false
+  
+  const expected = createHmac('sha256', secret).update(body).digest('hex')
+  return signature === expected
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    const bodyText = await request.text()
+    
+    // Verify webhook signature if secret is configured
+    if (process.env.MAGICHOUR_WEBHOOK_SECRET) {
+      if (!verifySignature(request, bodyText)) {
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      }
+    }
+    
+    const body = JSON.parse(bodyText)
     
     const { type, project_id, status, download_url, error_message } = body
 
