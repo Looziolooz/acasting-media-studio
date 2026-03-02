@@ -196,6 +196,8 @@ export function GeneratePanel() {
       {/* Prompt input */}
       <div className="space-y-2">
         <textarea
+          id="prompt"
+          name="prompt"
           value={rawPrompt}
           onChange={(e) => setRawPrompt(e.target.value)}
           placeholder="Describe what you want to create..."
@@ -209,11 +211,13 @@ export function GeneratePanel() {
       {/* Image upload for video generation */}
       {canUploadImages && (
         <div className="space-y-1.5">
-          <label className="text-xs text-white/40 uppercase tracking-wider">
+          <label htmlFor="imageUpload" className="text-xs text-white/40 uppercase tracking-wider">
             Upload Images (optional - for image-to-video)
           </label>
           <input
             type="file"
+            id="imageUpload"
+            name="imageUpload"
             ref={fileInputRef}
             onChange={handleImageUpload}
             accept="image/*"
